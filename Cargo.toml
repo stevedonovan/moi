@@ -1,0 +1,13 @@
+[package]
+name = "moi"
+version = "0.1.1"
+authors = ["steve donovan <steve.j.donovan@gmail.com>"]
+
+[dependencies]
+json = "0.11.12"
+mosquitto-client = {path="/home/steve/rust/mosquitto-client"}
+lapp = {path="/home/steve/rust/repos/lapp"}
+toml = "0.4.5"
+
+
+
