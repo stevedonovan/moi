@@ -102,7 +102,7 @@ fn command_succeeded(cmd: &str) -> bool {
 }
 
 // not very general, but at least copes with the sad death of ifconfig
-pub fn ip4_address(interface: &str) -> String {
+pub fn ip4_address(interface: &str) -> Option<String> {
     let mut addrs = Vec::new();
     if command_succeeded("which ifconfig") {
         let cmd = format!("ifconfig {}",interface);
@@ -134,7 +134,11 @@ pub fn ip4_address(interface: &str) -> String {
     } else {
         panic!("no ipconfig or ip commands");
     }
-    addrs[0].clone()
+    if addrs.len() > 0 {
+        Some(addrs[0].clone())
+    } else {
+        None
+    }
 }
 
 pub fn read_to_string<P: AsRef<Path>>(file: P) -> io::Result<String> {
@@ -225,7 +229,7 @@ impl Config {
                 Some(val) => val.to_string(),
                 None => "".into()
             };
-            let ip4 = ip4_address(&interface);
+            let ip4 = ip4_address(&interface).unwrap_or("127.0.0.1".into());
             //println!("interface {} IP4 {}",interface,ip4);
             map.insert("addr".into(),ip4.into());
         }
