@@ -120,7 +120,9 @@ fn special_destination_prefix(cfg: &Config, starts: &str) -> PathBuf {
         let tmp = env::temp_dir().join("MOID");
         if ! tmp.exists() {
             // hm, this is a bad possibility...
-            fs::create_dir(&tmp).expect("could not create tmp dir");
+            if ! tmp.exists() {
+                fs::create_dir(&tmp).expect("could not create tmp dir");
+            }
         }
         tmp
     } else {
@@ -288,7 +290,7 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
 
 fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     let res = if let Some(ref file) = mdata.cfg.pending_file {
-        println!("copying");
+        //println!("copying");
         let payload = msg.payload();
         let mut oo = fs::OpenOptions::new();
         oo.create(true).write(true);
@@ -326,7 +328,7 @@ fn run() -> BoxResult<()> {
     let query_me = m.subscribe( // for speaking directly to us...
             &format!("{}/{}",QUERY_TOPIC,config.addr()),
         1)?;
-    let action_me = m.subscribe(&format("MOI/pvt/store/{}",config.addr()),1)?;
+    let action_me = m.subscribe(&format!("MOI/pvt/store/{}",config.addr()),1)?;
     let quit = m.subscribe(QUIT_TOPIC,1)?;
     let mut mc = m.callbacks(MsgData::new(config,&m));
 
@@ -341,7 +343,7 @@ fn run() -> BoxResult<()> {
             if res != JsonValue::Null { // only tell mother about queries intended for us
                 if let Some(ref pending_file) = mdata.cfg.pending_file {
                     let topic = &format!("MOI/file/{}",mdata.seq);
-                    println!("pending {} subscribing {:?}",topic,pending_file);
+                    //println!("pending {} subscribing {:?}",topic,pending_file);
                     m.subscribe(&topic,1).unwrap();
                 }
                 // the response to "fetch" is a special snowflake
