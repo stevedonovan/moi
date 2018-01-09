@@ -9,7 +9,7 @@ some ways a reaction to Salt: small, focussed, assuming that the remote
 devices are Linux. We can always lean on a minimal POSIX environment
 in the remotes.
 
-## Toy Examples
+## No Server (except for broker) just Client
 
 For demonstration purposes, there's a set of JSON config files in the
 `examples` folder, and a script for launching four instances of the
@@ -153,6 +153,39 @@ bilbo-cargo.toml  frodo-cargo.toml  merry-cargo.toml pippin-cargo.toml
 `%n` is the value of `name`, `%a` is the value of `addr`, and `%t` is a
 Unix time stamp.
 
+## Running on Devices
 
+Although (unfortunately) dated, this upstart `moid.conf` illustrates an
+important point:
+
+```
+description "MOI Remote Daemon"
+
+start on net-device-up
+
+respawn
+
+chdir /usr/local/etc
+
+exec ./moid device.json
+
+post-stop script
+  if test -e moid-*
+  then
+    cp moid-* moid
+    rm moid-*
+  fi
+end script
+
+```
+The actual directories are not important (feelings on the subject can get
+both strong and confused) but note the action after the service has stopped:
+it will copy a new file over `moid` if it exists. So it is straightforward
+to update `moid` using `moid` itself - just give the new executable a
+suitable name.
+
+```
+$ moi push moid-0.1.2 self :: restart
+```
 
 
