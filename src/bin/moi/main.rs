@@ -69,8 +69,7 @@ struct CommandArgs {
     arguments: Vec<String>,
 }
 
-struct Args {
-    commands: Vec<CommandArgs>,
+struct Flags {
     filter_desc: String,
     group_name: String,
     config_file: PathBuf,
@@ -81,8 +80,8 @@ struct Args {
     quiet: bool,
 }
 
-impl Args {
-    fn new(args: &lapp::Args) -> BoxResult<Args> {
+impl Flags {
+    fn new(args: &lapp::Args) -> BoxResult<(Vec<CommandArgs>,Flags)> {
         if args.get_bool("version") {
             println!("MOI comand-line interface version {}",VERSION);
             std::process::exit(0);
@@ -95,7 +94,7 @@ impl Args {
             fs::create_dir(&moi_dir)?;
             write_all(&default_config,"[config]\nmqtt_addr = \"localhost\"\n")?;
             write_all(&json_store,"{}\n")?;
-            println!("Creating {}/moi.toml. Edit mqtt_addr if necessary",default_config.display());
+            println!("Creating {}.\nEdit mqtt_addr if necessary",default_config.display());
         }
 
         let command = args.get_string("command");
@@ -122,8 +121,7 @@ impl Args {
             push(this_chunk);
         }
 
-        Ok(Args {
-            commands: commands,
+        Ok((commands,Flags {
             filter_desc: args.get_string("filter"),
             group_name: args.get_string("group"),
             timeout: args.get_integer("timeout"),
@@ -132,7 +130,7 @@ impl Args {
             config_file: args.get_path("config"),
             json_store: json_store,
             moi_dir: moi_dir,
-        })
+        }))
 
     }
 }
@@ -333,7 +331,7 @@ impl MessageData {
         let seq: u8 = iter.next().unwrap().parse()?;
         let addr = iter.next().unwrap();
         let name = iter.next().unwrap();
-        println!("DBG: pull got {} {} {}",seq,addr,name);
+        //println!("DBG: pull got {} {} {}",seq,addr,name);
         *id = addr.into();
 
         (seq == self.seq)
@@ -417,6 +415,48 @@ impl MessageData {
             self.response(id,ok,handled);
         }
     }
+
+    fn finish_off(&mut self, store: &mut Config) -> BoxResult<bool> {
+        Ok(if let Query::Group(ref name, _) = *self.current_query() {
+            // the group command collects group members
+            // which we then persist to file
+            // TODO: error checking
+            println!("group {} created:",name);
+            for (k,v) in &self.group {
+                println!("{}\t{}",k,v);
+            }
+            let jg = to_jobject(&self.group);
+            { // NLL !
+                let groups = store.values.entry("groups".to_string())
+                    .or_insert_with(|| JsonValue::new_object());
+                groups[name] = jg;
+            }
+            store.write()?;
+            true
+        } else
+        if let Some(ref group_name) = self.maybe_group {
+            // Group filters rely on special key 'group', _plus_
+            // group responses are checked against saved group members
+            let group = &self.group;
+            let responses = &self.responses;
+            let mut ok = true;
+            for (id,_) in responses {
+                if let None = group.get(id) {
+                    println!("note: id {} not in group {}", id, group_name);
+                }
+            }
+            for (id,name) in group {
+                if ! responses.contains_key(id) {
+                    eprintln!("error: {} {} failed to respond", id, name);
+                    ok = false;
+                }
+            }
+            ok
+        } else {
+            self.responses.iter().all(|(_,&ok)| ok)
+        })
+    }
+
 }
 
 // implement our commands as Query enum values
@@ -520,7 +560,7 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
     }
 }
 
-fn query_alias(def: &toml::Value, args: &Args, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
+fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
     // MUST have at least "command" and "args"
     let alias_command = def["command"].as_str()
         .or_err("alias command must be string")?;
@@ -529,32 +569,32 @@ fn query_alias(def: &toml::Value, args: &Args, cmd: &CommandArgs, help: &str) ->
     let alias_args = strutil::replace_percent_args_array(&alias_args,&cmd.arguments)
         .map_err(|e| io_error(&format!("{} {} {}",cmd.command, help, e)))?;
 
-    if args.verbose {
+    if flags.verbose {
         println!("alias command {} args {:?}",alias_command,alias_args);
     }
     Ok(construct_query(alias_command,&alias_args)?)
 }
 
-fn query_alias_collect(t: &toml::Value, args: &mut Args, cmd: &CommandArgs, res: &mut Vec<Query>) -> BoxResult<()> {
+fn query_alias_collect(t: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, res: &mut Vec<Query>) -> BoxResult<()> {
     // either the filter or the group can be overriden, but currently only in the first command
     // of a sequence
     if let Some(filter) = t.get("filter") {
-        args.filter_desc = filter.as_str().or_err("filter must be string")?.into();
+        flags.filter_desc = filter.as_str().or_err("filter must be string")?.into();
     } else
     if let Some(group) = t.get("group") {
-        args.group_name = group.as_str().or_err("group must be string")?.into();
+        flags.group_name = group.as_str().or_err("group must be string")?.into();
     }
     // it's a cool thing to help people.
     let help = gets_or(t,"help","<no help>")?;
     // there may be multiple stages, so sections [commands.NAME.1], [commands.NAME.2]... etc in config
     let stages = geti_or(t,"stages",0)?;
     if stages == 0 {
-        res.push(query_alias(t,args,cmd,help)?);
+        res.push(query_alias(t,flags,cmd,help)?);
     } else {
         for i in 1..stages+1 {
             let idx = i.to_string();
             let sub = t.get(&idx).or_then_err(|| format!("stage {} not found",idx))?;
-            res.push(query_alias(sub,args,cmd,help)?);
+            res.push(query_alias(sub,flags,cmd,help)?);
         }
     }
     Ok(())
@@ -562,22 +602,21 @@ fn query_alias_collect(t: &toml::Value, args: &mut Args, cmd: &CommandArgs, res:
 
 // Program arguments passed as mutable reference, because
 // command aliases MAY modify the filter or group value
-fn construct_query_alias(aliases: Option<&toml::Value>, args: &mut Args) -> BoxResult<Query> {
+fn construct_query_alias(aliases: Option<&toml::Value>, commands: &[CommandArgs], flags: &mut Flags) -> BoxResult<Query> {
     let mut res = Vec::new();
-    let commands = args.commands.clone();
     for cmd in commands.iter() {
         let mut was_alias = false;
         // there is a section [commands.NAME] in the config TOML
         if let Some(ref lookup) = aliases {
             if let Some(t) = lookup.get(&cmd.command) { // we have an alias!
-                query_alias_collect(t,args,cmd,&mut res)?;
+                query_alias_collect(t,flags,cmd,&mut res)?;
                 was_alias = true;
             }
         }
         // OK, maybe the command NAME is NAME.toml or ~/.moi/NAME.toml
         if ! was_alias {
-            if let Some(toml) = maybe_toml_config(&cmd.command,&args.moi_dir)? {
-                query_alias_collect(&toml,args,cmd,&mut res)?;
+            if let Some(toml) = maybe_toml_config(&cmd.command,&flags.moi_dir)? {
+                query_alias_collect(&toml,flags,cmd,&mut res)?;
                 was_alias = true;
             }
         }
@@ -608,19 +647,20 @@ fn cat(a: &str, b: &str) -> String {
 }
 
 // our real error-returning main function.
-fn run(lapp_args: &lapp::Args) -> BoxResult<bool> {
-    let mut args = Args::new(&lapp_args)?;
-    let toml: toml::Value = read_to_string(&args.config_file)?.parse()?;
+fn run() -> BoxResult<bool> {
+    let lapp_args = lapp::parse_args(USAGE);
+    let (commands,mut flags) = Flags::new(&lapp_args)?;
+    let toml: toml::Value = read_to_string(&flags.config_file)?.parse()?;
     let config = toml.get("config").or_err("No [config] section")?;
     config.is_table().or_err("config must be a table")?;
     let command_aliases = toml.get("commands");
 
-    let mut store = Config::new_from_file(&args.json_store)?;
+    let mut store = Config::new_from_file(&flags.json_store)?;
 
-    if args.commands[0].command == "groups" {
+    if commands[0].command == "groups" {
         if let Some(groups) = store.values.get("groups") {
             for (name,members) in groups.entries() {
-                if args.verbose {
+                if flags.verbose {
                     println!("{}:",name);
                     for (addr,name) in members.entries() {
                         println!("\t{}\t{}",addr,name);
@@ -651,11 +691,11 @@ fn run(lapp_args: &lapp::Args) -> BoxResult<bool> {
 
     // parse the command and create a Query
     // This looks up any command aliases and may modify
-    // args.group or args.filter
-    let query = construct_query_alias(command_aliases, &mut args)?;
+    // flags.group or flags.filter
+    let query = construct_query_alias(command_aliases, &commands, &mut flags)?;
 
     // message data is managed by mosquitto on_message handler
-    let mut message_data = MessageData::new(&m,args.verbose,args.quiet);
+    let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet);
     message_data.all_group = match store.values.get("groups") {
         Some(groups) => {
             groups["all"].clone()
@@ -666,15 +706,15 @@ fn run(lapp_args: &lapp::Args) -> BoxResult<bool> {
 
     // --group NAME works like --filter groups:NAME
     // except the results are checked against saved group information
-    if args.group_name != "none" {
-        if args.filter_desc != "none" {
+    if flags.group_name != "none" {
+        if flags.filter_desc != "none" {
             println!("note: ignoring --filter when --group is present");
         }
-        let jgroup = lookup_group(&store, &args.group_name)?;
-        args.filter_desc = format!("groups:{}",args.group_name);
-        message_data.set_group(&args.group_name,jgroup);
+        let jgroup = lookup_group(&store, &flags.group_name)?;
+        flags.filter_desc = format!("groups:{}",flags.group_name);
+        message_data.set_group(&flags.group_name,jgroup);
     }
-    let filter = Condition::from_description(&args.filter_desc);
+    let filter = Condition::from_description(&flags.filter_desc);
     // Queries only meant for one device cause a temporary group
     // to be created.
     if let Some((id,was_addr)) = filter.unique_id() {
@@ -689,7 +729,7 @@ fn run(lapp_args: &lapp::Args) -> BoxResult<bool> {
 
     // we warn because launch gets a very fat default timeout...
     let timeout = timeout::Timeout::new_shared(
-        if launching {LAUNCH_TIMEOUT} else {args.timeout}
+        if launching {LAUNCH_TIMEOUT} else {flags.timeout}
     );
 
     let msg_timeout = timeout.clone();
@@ -777,52 +817,13 @@ fn run(lapp_args: &lapp::Args) -> BoxResult<bool> {
 
     m.loop_until_disconnect(-1)?;
 
-    let msg_data = &mc.data;
-    let ok = if let Query::Group(ref name, _) = *msg_data.current_query() {
-        // the group command collects group members
-        // which we then persist to file
-        // TODO: error checking
-        println!("group {} created:",name);
-        for (k,v) in &msg_data.group {
-            println!("{}\t{}",k,v);
-        }
-        let jg = to_jobject(&msg_data.group);
-        { // NLL !
-            let groups = store.values.entry("groups".to_string())
-                .or_insert_with(|| JsonValue::new_object());
-            groups[name] = jg;
-        }
-        store.write()?;
-        true
-    } else
-    if let Some(ref group_name) = msg_data.maybe_group {
-        // Group filters rely on special key 'group', _plus_
-        // group responses are checked against saved group members
-        let group = &msg_data.group;
-        let responses = &msg_data.responses;
-        let mut ok = true;
-        for (id,_) in responses {
-            if let None = group.get(id) {
-                println!("note: id {} not in group {}", id, group_name);
-            }
-        }
-        for (id,name) in group {
-            if ! responses.contains_key(id) {
-                eprintln!("error: {} {} failed to respond", id, name);
-                ok = false;
-            }
-        }
-        ok
-    } else {
-        let ok = msg_data.responses.iter().all(|(_,&ok)| ok);
-        ok
-    };
+    let ok = mc.data.finish_off(&mut store)?;
+
     Ok(ok)
 }
 
 fn main() {
-    let args = lapp::parse_args(USAGE);
-    match run(&args) {
+    match run() {
         Ok(ok) => {
             if ! ok {
                 std::process::exit(1);
