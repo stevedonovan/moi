@@ -1,6 +1,7 @@
 // Shared code between moi (the cli driver) and moid (the daemon)
 // Mostly manages a convenient JSON store
 extern crate json;
+extern crate get_if_addrs;
 use std::path::{Path,PathBuf};
 use std::io;
 use std::io::prelude::*;
@@ -96,6 +97,31 @@ pub fn spawn_shell_command(cmd: &str, pwd: Option<&Path>) -> process::Child {
     c
 }
 
+pub fn ip4_address(interface: &str) -> Option<String> {
+    use get_if_addrs::*;
+    let addrs = match get_if_addrs() {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            eprintln!("unable to get network interface {}",e);
+            return None;
+        }
+    };
+    for iface in addrs {
+        if let IfAddr::V4(ref iface4) = iface.addr {
+            let ip = iface4.ip.to_string();
+            if iface.name == interface {
+                return Some(ip);
+            } else
+            if ! iface.is_loopback() {
+                return Some(ip);
+            }
+        }
+
+    }
+    return None
+}
+
+/*
 fn command_succeeded(cmd: &str) -> bool {
     let (code,_,_) = run_shell_command(cmd,None);
     code == 0
@@ -140,6 +166,7 @@ pub fn ip4_address(interface: &str) -> Option<String> {
         None
     }
 }
+*/
 
 pub fn read_to_string<P: AsRef<Path>>(file: P) -> io::Result<String> {
     let path = file.as_ref();

@@ -8,6 +8,7 @@ json = "0.11.12"
 mosquitto-client = {path="/home/steve/rust/mosquitto-client"}
 lapp = {path="/home/steve/rust/repos/lapp"}
 toml = "0.4.5"
+get_if_addrs = "0.4.1"
 
 
 
