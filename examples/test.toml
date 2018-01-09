@@ -1,0 +1,12 @@
+help = "testing baggins"
+group = "baggins"
+stages=2
+
+[1]
+command = "ls"
+args = ["A"]
+
+[2]
+command = "ls"
+args = ["%1"]
+

@@ -1,0 +1,28 @@
+[config]
+mqtt_addr = "localhost"
+
+[commands.frodo]
+help = "get uptime just from frodo"
+command = "run"
+args = ["uptime"]
+filter = "name=frodo"
+
+[commands.baggins]
+help = "list KEY from baggins group"
+command = "ls"
+args = ["%1"]
+group = "baggins"
+
+[commands.bingo]
+stages=2
+
+[commands.bingo.1]
+command = "set"
+args = ["B=1"]
+
+[commands.bingo.2]
+command = "ls"
+args = ["B"]
+
+
+
