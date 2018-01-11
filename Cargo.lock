@@ -35,7 +35,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "lapp"
-version = "0.3.0"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "libc"
@@ -48,14 +49,15 @@ version = "0.1.1"
 dependencies = [
  "get_if_addrs 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "json 0.11.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "lapp 0.3.0",
- "mosquitto-client 0.1.1",
+ "lapp 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mosquitto-client 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "mosquitto-client"
-version = "0.1.1"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "serde"
@@ -81,7 +83,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum get_if_addrs 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "da2383c2f4e45082129ad20f4a309aaa1f26c9ed4045082902bc2951ec9c6a3c"
 "checksum get_if_addrs-sys 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7cf68ed691805f2dfe4e83cf85e3d373e704c3654c454dbb3280a15e2ea8d509"
 "checksum json 0.11.12 (registry+https://github.com/rust-lang/crates.io-index)" = "39ebf0fac977ee3a4a3242b6446004ff64514889e3e2730bbd4f764a67a2e483"
+"checksum lapp 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "44758669f6f88b6dddac3f833f234d5128530108b5738932a166eb69660faea8"
 "checksum libc 0.2.35 (registry+https://github.com/rust-lang/crates.io-index)" = "96264e9b293e95d25bfcbbf8a88ffd1aedc85b754eba8b7d78012f638ba220eb"
+"checksum mosquitto-client 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "daf1819ff94ecec7d635b34d1a3db90e6146f4664001690120826b7c4dc0a68c"
 "checksum serde 1.0.27 (registry+https://github.com/rust-lang/crates.io-index)" = "db99f3919e20faa51bb2996057f5031d8685019b5a06139b1ce761da671b8526"
 "checksum toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a7540f4ffc193e0d3c94121edb19b055670d369f77d5804db11ae053a45b6e7e"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"

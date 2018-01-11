@@ -67,9 +67,12 @@ There is a slight delay when executing these commands, because a timeout
 is used when collecting all the responses (you can use `--timeout` to
 specify a different value in milliseconds.)
 
-It's recommended to immediately create a _group_. "all" is considered
-special, but you can use any filter condition to create arbitrary
-groups. Once defined, you can filter on a group with `--group`:
+It's recommended to immediately create the "all" _group_. "all" is considered
+special, because `moi` will use it to map addresses to names when displaying
+results.
+
+But you can use any filter condition to create arbitrary
+groups. Once defined, you can filter on a group with `--group` (or `-g` for short):
 
 ```
 moi$ moi group all
@@ -91,7 +94,10 @@ moi$ moi -g all ls
 10.10.10.11	bilbo
 ```
 There is an important difference between `moi -g all ls` and `moi ls` - groups are
-persistent. If we were to lose a remote, then `moi` would complain. Can simulate
+persistent. If we were to lose a remote, then `moi` would complain that the
+remote did not respond.
+
+Can simulate
 this with the `restart` command, which stops a remote (it has this name because
 when run as a service this will result in it being respawned)
 
@@ -112,6 +118,16 @@ This group behaviour makes it straightforward to quickly detect any missing chil
 especially with `ping` used with `--quiet` - output is only produced if there is
 an error.
 
+`time` is a quick way to check if remotes are time-synched with some
+server - the difference between local and remote time is printed. Like `ping`,
+it's basically a specialized `ls` command - there is always a remote key
+`time` with the value of the remote's time as a Unix timestamp.
+
+```
+moi$ moi -f name=jessie time
+192.168.0.13	jessie	1
+```
+
 The basic management operations are _pushing_ new files to a remote, and
 _running_ commmands remotely:
 
@@ -130,7 +146,10 @@ is easier to type. By default commands are run in the home directory, but
 a second working-directory argument can be specified. Another special
 destination name is `self` - the current working directory of the `moid`
 process itself. So this works as expected - our remotes are all fake
-and are running in the same directory:
+and are running in the same directory.
+
+Here is `run`: the command `pwd` is run in the working directory `self`.
+(They are just our local fakes, so the output isn't very interesting)
 
 ```
 moi$ moi run pwd self
@@ -139,6 +158,43 @@ moi$ moi run pwd self
 10.10.10.22	merry	/home/steve/rust/repos/moi/examples
 10.10.10.23	pippin	/home/steve/rust/repos/moi/examples
 ```
+
+More elaborate commands are tedious to type, because of shell quoting rules.
+So `push-run` first pushes a file and then runs a command (note that
+permissions of a pushed file are preserved, and another special destination
+`tmp`)
+
+```
+scratch$ cat space
+df -h / | awk '{getline; print $4}'
+scratch$ moi -f name=jessie push-run space tmp './space'
+192.168.0.13	jessie	18G
+```
+
+A common operation on remotes which are not Internet-connected is installing packages:
+```
+scratch$ moi -T 5000 -f name=jessie push-run tree_1.7.0-3_i386.deb tmp 'dpkg -i tree_1.7.0-3_i386.deb'
+192.168.0.13	jessie:
+(Reading database ... 22048 files and directories currently installed.)
+Preparing to unpack tree_1.7.0-3_i386.deb ...
+Unpacking tree (1.7.0-3) over (1.7.0-3) ...
+Setting up tree (1.7.0-3) ...
+Processing triggers for man-db (2.7.0.2-5) ...
+
+scratch$ moi -f name=jessie run tree
+192.168.0.13	jessie:
+.
+├── hello
+├── jessie.json
+├── moid
+└── tree_1.7.0-3_i386.deb
+
+0 directories, 4 files
+```
+`dpkg` can take some time, when the package cache is cold, so we have to push
+up the timeout
+
+TODO: 'launch :: wait' solution.
 
 `pull` retrieves files from remotes. Here the arguments are the remote
 file and the local destination file name. This obviously cannot be the
@@ -152,6 +208,97 @@ bilbo-cargo.toml  frodo-cargo.toml  merry-cargo.toml pippin-cargo.toml
 ```
 `%n` is the value of `name`, `%a` is the value of `addr`, and `%t` is a
 Unix time stamp.
+
+## Remotes are Key-Value Stores
+
+An important command is `set` which sets a remote named value. (There is
+no `get` because it's spelled `ls`.)
+
+```
+scratch$ moi set A=1
+scratch$ moi ls A
+10.10.10.10	frodo	1
+10.10.10.11	bilbo	1
+10.10.10.22	merry	1
+10.10.10.23	pippin	1
+```
+The special value `null` erases a key:
+
+```
+scratch$ moi -g baggins set A=null
+scratch$ moi ls A
+10.10.10.22	merry	1
+10.10.10.23	pippin	1
+10.10.10.10	frodo	null
+10.10.10.11	bilbo	null
+scratch$ moi -f A ls
+10.10.10.23	pippin
+10.10.10.22	merry
+```
+The importance of `set` is that `--filter` works on key-values. In the last case, just
+giving the key `A` implies that it's a simple existence check. Can check for specific
+values:
+
+```
+scratch$ moi -g baggins set A=2
+scratch$ moi -f A=2 ls
+10.10.10.10	frodo
+10.10.10.11	bilbo
+```
+Typically, you do not want to force an expensive upgrade on stations that are
+already upgraded!  So setting keys for installed programs means that only
+remotes which match the condition will receive the installer.
+
+## Command Aliases
+
+We had an example of running a more elaborate remote command, and
+simplifying the problem with pushing and executing a shell script.
+
+There is another alternative. If `moi` is given a command `foo`, then it will
+look for `foo.toml` in current directory, and then `~/moi/foo.toml`.
+The structure of that TOML file is straightforward - you must provide
+the command name, and an array of arguments. Can also specify a filter
+with either `filter` or `group`.
+
+```
+scratch$ cat space.toml
+command = "run"
+args = ["df -h / | awk '{getline; print $4}'"]
+filter = "name=jessie"
+
+scratch$ moi space
+192.168.0.13	jessie	18G
+scratch$ mv space.toml ~/.moi
+scratch$ moi space
+192.168.0.13	jessie	18G
+```
+Alternatively, you can edit `~/.moi/config.toml` and add the following
+section - `help` is usually a good idea as well!
+
+```
+[commands.space]
+help="how much room has Jessie?"
+command = "run"
+args = ["df -h / | awk '{getline; print $4}'"]
+filter = "name=jessie"
+```
+It's a matter of taste and convenience whether it's a standalone alias,
+or inside the main config TOML.
+
+Aliases can do argument substitution. Say we really liked the `push-run`
+approach but found it involved too much typing:
+
+```
+scratch$ tail -n4 ~/.moi/config.toml
+[commands.pushr]
+help = "push and run a script"
+command = "push-run"
+args=["%1","tmp","./%1"]
+
+scratch$ moi -f name=jessie pushr space
+192.168.0.13	jessie	18G
+```
+
 
 ## Running on Devices
 
