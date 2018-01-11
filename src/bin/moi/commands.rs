@@ -205,20 +205,23 @@ impl FetchFile {
 pub struct RunCommand {
     cmd: String,
     pwd: Option<String>,
+    jobname: Option<String>,
 }
 
 impl RunCommand {
-    pub fn new(cmd: &str, pwd: Option<String>) -> RunCommand {
+    pub fn new(cmd: &str, pwd: Option<String>, jobname: Option<String>) -> RunCommand {
         RunCommand {
             cmd: cmd.into(),
             pwd: pwd,
+            jobname: jobname,
         }
     }
 
     fn to_json(&self) -> JsonValue {
         object! {
             "cmd" => self.cmd.as_str(),
-            "pwd" => as_option(&self.pwd)
+            "pwd" => as_option(&self.pwd),
+            "job" => as_option(&self.jobname)
         }
     }
 }
@@ -241,6 +244,7 @@ pub enum Query {
     Ping(Instant),
     Chain(Vec<Query>),
     Actions(Vec<Query>),
+    Wait,
 }
 
 fn pair_map(name: &str, value: &str) -> StringMap {
@@ -264,6 +268,16 @@ impl Query {
         Query::Get(args,command.into())
     }
 
+/*
+    pub fn columns(&self) -> Vec<String> {
+        match *self {
+            Query::Get(ref vars) => {
+                vars.into()
+            },
+            Query(
+        }
+    }
+*/
     pub fn group(name: &str) -> Query {
         Query::Group(
             name.into(),
@@ -278,9 +292,9 @@ impl Query {
         Query::Rma(pair_map(name,value))
     }
 
-    pub fn is_launch(&self) -> bool {
+    pub fn is_wait(&self) -> bool {
         match *self {
-            Query::Launch(_) => true,
+            Query::Wait => true,
             _ => false
         }
     }
@@ -306,36 +320,9 @@ impl Query {
                 }
                 object!{"chain" => res}
             },
+            Query::Wait => JsonValue::Null,
             Query::Actions(_) => panic!("used Actions directly!")
         }
     }
 }
-
-/*
-
-    pub fn set(key: &str, val: &str) -> Query {
-        let mut map = HashMap::new();
-        map.insert(key.into(),val.into());
-        Query::Set(map)
-    }
-
-    pub fn seta(key: &str, val: &str) -> Query {
-        let mut map = HashMap::new();
-        map.insert(key.into(),val.into());
-        Query::Seta(map)
-    }
-
-    pub fn run(cmd: &str, pwd: Option<String>) -> Query {
-        Query::Run(RunCommand::new(cmd,pwd))
-    }
-
-    pub fn copy(file: PathBuf, dest: &str) -> Query {
-        Query::Copy(CopyFile::new(file,dest))
-    }
-
-    pub fn chain(v: Vec<Query>) -> Query {
-        Query::Chain(v)
-    }
-*/
-
 
