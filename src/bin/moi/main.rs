@@ -537,7 +537,7 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             let dest = &args[1];
             let cmd = &args[2];
             Ok(Query::Actions(vec![
-                construct_query("cp",&strings(&[file,dest]))?,
+                construct_query("push",&strings(&[file,dest]))?,
                 construct_query("run",&strings(&[cmd,dest]))? // use dest as pwd
             ]))
         },

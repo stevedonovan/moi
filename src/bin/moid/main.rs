@@ -342,7 +342,7 @@ fn run() -> BoxResult<()> {
                 Err(e) => mdata.error_result(e.description())
             };
             if res != JsonValue::Null { // only tell mother about queries intended for us
-                if let Some(ref pending_file) = mdata.cfg.pending_file {
+                if let Some(ref _pending_file) = mdata.cfg.pending_file {
                     let topic = &format!("MOI/file/{}",mdata.seq);
                     //println!("pending {} subscribing {:?}",topic,pending_file);
                     m.subscribe(&topic,1).unwrap();

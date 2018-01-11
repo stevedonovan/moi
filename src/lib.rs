@@ -121,53 +121,6 @@ pub fn ip4_address(interface: &str) -> Option<String> {
     return None
 }
 
-/*
-fn command_succeeded(cmd: &str) -> bool {
-    let (code,_,_) = run_shell_command(cmd,None);
-    code == 0
-}
-
-// not very general, but at least copes with the sad death of ifconfig
-pub fn ip4_address(interface: &str) -> Option<String> {
-    let mut addrs = Vec::new();
-    if command_succeeded("which ifconfig") {
-        let cmd = format!("ifconfig {}",interface);
-        let (_code,output,_) = run_shell_command(&cmd,None);
-        const START: &str = "inet addr:";
-        let mut s = output.as_str();
-        while let Some(pos) = s.find(START) {
-            s = &s[pos+START.len()..];
-            let ispace = s.find(' ').unwrap();
-            let addr = &s[0..ispace];
-            if addr != "127.0.0.1" {
-                addrs.push(addr.to_string());
-            }
-            s = &s[ispace..];
-        }
-    } else if command_succeeded("which ip") {
-        let (_code,output,_) = run_shell_command("ip -4 a",None);
-        const START: &str = "inet ";
-        let mut s = output.as_str();
-        while let Some(pos) = s.find(START) {
-            s = &s[pos+START.len()..];
-            let islash = s.find('/').unwrap();
-            let addr = &s[0..islash];
-            if addr != "127.0.0.1" {
-                addrs.push(addr.to_string());
-            }
-            s = &s[islash..];
-        }
-    } else {
-        panic!("no ipconfig or ip commands");
-    }
-    if addrs.len() > 0 {
-        Some(addrs[0].clone())
-    } else {
-        None
-    }
-}
-*/
-
 pub fn read_to_string<P: AsRef<Path>>(file: P) -> io::Result<String> {
     let path = file.as_ref();
     let mut f = File::open(path)
@@ -286,17 +239,15 @@ impl Config {
     // the idea is NOT to add values if already present in the array
     // Must ask explicitly to remove tho
     pub fn insert_array(&mut self, key: &str, val: &JsonValue, remove: bool) -> io::Result<()> {
-        println!("insert {} {} {}",key,val,remove);
+        //println!("insert {} {} {}",key,val,remove);
         let arr = self.values.entry(key.into())
             .or_insert_with(|| JsonValue::new_array());
         (arr.is_array()).or_then_err(|| format!("{} is not array-valued",key))?;
 
         let present = arr.members().any(|v| v == val);
-        println!("gotcha {} {}",present,arr);
         if remove {
             if present {
                 let pos = arr.members().position(|v| v == val).unwrap();
-                println!("pos {} {}",pos,arr);
                 arr.array_remove(pos);
             }
         } else
