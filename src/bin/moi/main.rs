@@ -250,10 +250,12 @@ impl MessageData {
         if ! ok && ! handled {
             eprintln!("{} {} failed",id,self.lookup_name(&id));
         }
+        if self.verbose {
+            println!("response {} {} {}",id,ok,handled);
+        }
         self.responses.insert(id,ok);
         if self.maybe_group.is_some() {
             // not quite right ;)  Should check membership
-            //println!("DBG: {:?} {:?}",self.responses,self.group);
             self.finis = self.responses.len() == self.group.len();
         }
     }
@@ -273,9 +275,6 @@ impl MessageData {
             self.query.extend(queries);
         } else {
             self.query.push(q);
-        }
-        if self.verbose {
-            println!("queries: {:?}",self.query);
         }
     }
 
@@ -297,7 +296,11 @@ impl MessageData {
 
     // how our JSON payload is encoded for remote queries
     fn send_query(&mut self) -> BoxResult<()> {
+        if self.verbose {
+            println!("query {:?}",self.current_query());
+        }
         let q = self.current_query().to_json();
+        self.responses.clear();
         if q == JsonValue::Null {
             return Ok(());
         }
@@ -310,7 +313,6 @@ impl MessageData {
         if self.verbose {
             println!("sent {}",payload);
         }
-        self.responses.clear();
         self.m.publish(&self.query_topic,payload.as_bytes(),1,false)?;
         Ok(())
     }
@@ -579,9 +581,12 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
 
 fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
     // MUST have at least "command" and "args"
-    let alias_command = gets_or(def,"command","<none>")?;
-    let alias_args = toml_strings(def["args"].as_array()
-        .or_err("alias args must be array")?)?;
+    let alias_command = def.get("command").or_err("alias: command must be defined")?
+        .as_str().or_err("alias: command must be string")?;
+
+    let alias_args = toml_strings(def.get("args").or_err("alias: args must be defined")?
+        .as_array().or_err("alias: args must be array")?
+    )?;
     let alias_args = strutil::replace_percent_args_array(&alias_args,&cmd.arguments)
         .map_err(|e| io_error(&format!("{} {} {}",cmd.command, help, e)))?;
 
@@ -738,11 +743,10 @@ fn run() -> BoxResult<bool> {
     }
     message_data.filter = filter;
 
-    //~ let launching = message_data.query.iter().any(|q| q.is_wait());
-    //~ if launching && message_data.maybe_group.is_none() {
-        //~ println!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
-    //~ }
-
+    let launching = message_data.query.iter().any(|q| q.is_wait());
+    if launching && message_data.maybe_group.is_none() {
+        println!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
+    }
 
     let timeout = timeout::Timeout::new_shared(flags.timeout);
 
@@ -761,7 +765,11 @@ fn run() -> BoxResult<bool> {
                 if data.verbose {
                     println!("id {} resp {}",id, resp.to_string());
                 }
-                data.handle_response(id,resp);
+                if seq != data.seq {
+                    eprintln!("late arrival {}: seq {} != {}",id,seq,data.seq);
+                } else {
+                    data.handle_response(id,resp);
+                }
             }
         } else
         if file_resp.matches(&msg) {

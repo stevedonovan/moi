@@ -85,7 +85,7 @@ fn match_condition(cfg: &Config, how: &str, condn: &JsonValue) -> io::Result<boo
         return Ok(subr);
     }
     let args = array_of_strings(&condn)?;
-    let first_val = if let Some(val) = cfg.values.get(args[0]) {
+    let first_val = if let Ok(val) = cfg.get(args[0]) {
         if how == "exists" { return Ok(true); }
         val
     } else {
@@ -94,12 +94,12 @@ fn match_condition(cfg: &Config, how: &str, condn: &JsonValue) -> io::Result<boo
         return Ok(how=="neq" || how=="nexists");
     };
     (args.len() == 2).or_err("condition needs key and value")?;
+    let first_str = first_val.to_string();
     Ok(match how {
-        "eq" => first_val == args[1],
-        "neq" => first_val != args[1],
+        "eq" => first_str == args[1],
+        "neq" => first_str != args[1],
         "starts" => { // start pattern
-            let val = as_str(first_val)?;
-            val.starts_with(args[1])
+            first_str.starts_with(args[1])
         },
         "elem" => {
             first_val.is_array().or_err("elem only on array values")?;
