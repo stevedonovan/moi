@@ -171,6 +171,16 @@ scratch$ moi -f name=jessie push-run space tmp './space'
 192.168.0.13	jessie	18G
 ```
 
+`push-run` is a convenient shortcut - `moi` supports multi-staged commands separated
+by "::".
+
+```
+scratch$ moi -f name=jessie push space tmp :: run ./space tmp
+192.168.0.13	jessie	18G
+```
+The filter (or group) is operational for all stages, and every remote must finish
+reporting at the end of a stage (within the timeout).
+
 A common operation on remotes which are not Internet-connected is installing packages:
 ```
 scratch$ moi -T 5000 -f name=jessie push-run tree_1.7.0-3_i386.deb tmp 'dpkg -i tree_1.7.0-3_i386.deb'
@@ -192,9 +202,35 @@ scratch$ moi -f name=jessie run tree
 0 directories, 4 files
 ```
 `dpkg` can take some time, when the package cache is cold, so we have to push
-up the timeout
+up the timeout. There is another solution:
 
-TODO: 'launch :: wait' solution.
+```
+scratch$ alias jessie='moi -f name=jessie'
+scratch$ jessie push tree_1.7.0-3_i386.deb tmp :: launch 'dpkg -i tree_1.7.0-3_i386.deb' tmp :: wait
+```
+
+`launch` is intended for longer-lasting tasks, and here it's used synchronously - `moi` will wait
+only as long as is needed, although a long default timeout (20s) is set for the final `wait`.
+`moi` will in fact complain if there's no group filter because otherwise it simply does not know
+when things have finished - a single `name` or `addr` query counts as a "group of one" for
+these purposes.
+
+Sometimes you simply don't want (or need) to wait. `launch` takes a 3rd optional argument,
+which is a _job name_. This is a key which you can use to retrieve results later - subfield
+matches are supported by `ls`.
+
+```
+moi$ jessie launch 'sleep 5 && echo yay' tmp sleep-job
+moi$ # Returns immediately. Now wait a bit!
+moi$ jessie ls sleep-job
+192.168.0.13	jessie	{"code":0,"stdout":"yay","stderr":""}
+moi$ jessie ls sleep-job.code
+192.168.0.13	jessie	0
+scratch$ # can use in a condition...
+scratch$ moi -f sleep-job.code=0 ls192.168.0.13	jessie
+192.168.0.13	jessie
+
+```
 
 `pull` retrieves files from remotes. Here the arguments are the remote
 file and the local destination file name. This obviously cannot be the
@@ -244,6 +280,9 @@ scratch$ moi -g baggins set A=2
 scratch$ moi -f A=2 ls
 10.10.10.10	frodo
 10.10.10.11	bilbo
+scratch$ moi -g baggins set A=3 :: ls A
+10.10.10.10	frodo	3
+10.10.10.11	bilbo	3
 ```
 Typically, you do not want to force an expensive upgrade on stations that are
 already upgraded!  So setting keys for installed programs means that only
@@ -275,7 +314,7 @@ scratch$ moi space
 Alternatively, you can edit `~/.moi/config.toml` and add the following
 section - `help` is usually a good idea as well!
 
-```
+```toml
 [commands.space]
 help="how much room has Jessie?"
 command = "run"
@@ -299,6 +338,56 @@ scratch$ moi -f name=jessie pushr space
 192.168.0.13	jessie	18G
 ```
 
+It is possible to do multistage aliases, which are full-blown recipes:
+
+```toml
+# deb.toml
+help = "installing Debian package"
+stages = 4
+
+[1]
+command = "push"
+args = ["%1","tmp"]
+
+[2]
+command = "launch"
+args = ["dpkg -i %1","tmp"]
+
+[3]
+command = "wait"
+args = []
+
+[4]
+command = "set"
+args = ["%1@package=%1@version"]
+
+```
+Percent-substitutions in aliases can be followed by "@op" - (this notation is not
+the prettiest and may be changed.)
+
+The last line sets a key (made out of the package name) to a value (the package version);
+we define a package name is everything up to the first dash or underscore followed by
+a digit.
+
+
+```
+scratch$ alias jessie='moi -f name=jessie'
+scratch$ jessie deb
+error: deb installing Debian package index %1 out of range: (0 arguments given)
+scratch$ jessie deb tree_1.7.0-3_i386.deb
+192.168.0.13	jessie:
+(Reading database ... 22048 files and directories currently installed.)
+Preparing to unpack tree_1.7.0-3_i386.deb ...
+Unpacking tree (1.7.0-3) over (1.7.0-3) ...
+Setting up tree (1.7.0-3) ...
+Processing triggers for man-db (2.7.0.2-5) ...
+
+scratch$ jessie ls tree
+192.168.0.13	jessie	1.7.0-3_i386.deb
+```
+
+So, the use of giving "help" is that the error messages are a bit nicer. (It _would_
+be cool to have a `moi` command which gives help for all extension commands available.)
 
 ## Running on Devices
 
@@ -334,5 +423,6 @@ suitable name.
 ```
 $ moi push moid-0.1.2 self :: restart
 ```
+
 
 
