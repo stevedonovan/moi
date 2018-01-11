@@ -12,6 +12,7 @@ mod strutil;
 mod commands;
 mod toml_utils;
 mod timeout;
+// mod output;
 
 use commands::*;
 use toml_utils::*;
@@ -45,6 +46,7 @@ Execute commands on devices
   -T, --timeout (default 300) timeout for accessing all devices
   -v, --verbose tell us all about what's going on...
   -q, --quiet output only on error
+  -m, --message-format (default plain) one of plain,csv or json
   <command> (string)
         ls <keys>: display values of keys (defaults to 'addr','name')
         run cmd [pwd]: run command remotely
@@ -78,6 +80,7 @@ struct Flags {
     timeout: i32,
     verbose: bool,
     quiet: bool,
+   // format: String,
 }
 
 impl Flags {
@@ -130,6 +133,7 @@ impl Flags {
             config_file: args.get_path("config"),
             json_store: json_store,
             moi_dir: moi_dir,
+     //       format: args.get_string("message_format"),
         }))
 
     }
@@ -158,10 +162,11 @@ struct MessageData {
     seq: u8,
     verbose: bool,
     quiet: bool,
+   // formatter: output::Output,
 }
 
 impl MessageData {
-    fn new (m: &Mosquitto, verbose: bool, quiet: bool) -> MessageData {
+    fn new (m: &Mosquitto, verbose: bool, quiet: bool) -> MessageData { // , formatter: output::Output
         MessageData {
             m: m.clone(),
             sent_file: None,
@@ -176,6 +181,7 @@ impl MessageData {
             seq: 0,
             verbose: verbose,
             quiet: quiet,
+            //formatter: formatter
         }
     }
 
@@ -291,10 +297,14 @@ impl MessageData {
 
     // how our JSON payload is encoded for remote queries
     fn send_query(&mut self) -> BoxResult<()> {
+        let q = self.current_query().to_json();
+        if q == JsonValue::Null {
+            return Ok(());
+        }
         let q_json = object! {
             "seq" => self.seq,
             "which" => self.filter.to_json(),
-            "what" => self.current_query().to_json()
+            "what" => q,
         };
         let payload = q_json.to_string();
         if self.verbose {
@@ -358,8 +368,14 @@ impl MessageData {
             Query::Get(_, ref command) => {
                 match command.as_str() {
                     "ls" =>  {
-                        for r in resp.members() {
-                            print!("{}\t",r);
+                        // Ugly. It will get Better...
+                        let n = resp.len();
+                        for idx in 0..n {
+                            let r = &resp[idx];
+                            print!("{}",r);
+                            if idx < n-1 {
+                                print!("\t");
+                            }
                         }
                         println!();
                     },
@@ -387,10 +403,10 @@ impl MessageData {
                 ok = Some(self.handle_run_launch(&id,resp));
                 handled = true;
             },
-            Query::Launch(_) => {
-                // remote is saying 'fine I've launched process. Be patient'
-                ok = None;
-            },
+            //~ Query::Launch(_) => {
+                //~ // remote is saying 'fine I've launched process. Be patient'
+                //~ ok = None;
+            //~ },
             Query::Fetch(_) => {
                 // note: not currently used...
                 // contents coming over as MOI/fetch/{seq}/{addr}/{name}
@@ -493,14 +509,15 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             Ok(Query::rma("groups",&args[0]))
         },
         "run" | "launch" | "spawn" => {
-            (args.len() >= 1).or_err("run: command [working-dir]")?;
-            let rc = RunCommand::new(&args[0],args.get(1).cloned());
+            (args.len() >= 1).or_err("run: command [working-dir] [job-name]")?;
+            let rc = RunCommand::new(&args[0],args.get(1).cloned(),args.get(2).cloned());
             Ok(
                 if cmd=="run" {Query::Run(rc)}
                 else if cmd=="launch" {Query::Launch(rc)}
                 else {Query::Spawn(rc)}
             )
         },
+        "wait" => Ok(Query::Wait),
         "push" => {
             (args.len() == 2).or_err("push: local-file-name remote-dest")?;
             let path = PathBuf::from(args[0].clone());
@@ -562,8 +579,7 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
 
 fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
     // MUST have at least "command" and "args"
-    let alias_command = def["command"].as_str()
-        .or_err("alias command must be string")?;
+    let alias_command = gets_or(def,"command","<none>")?;
     let alias_args = toml_strings(def["args"].as_array()
         .or_err("alias args must be array")?)?;
     let alias_args = strutil::replace_percent_args_array(&alias_args,&cmd.arguments)
@@ -722,15 +738,13 @@ fn run() -> BoxResult<bool> {
     }
     message_data.filter = filter;
 
-    let launching = message_data.query.iter().any(|q| q.is_launch());
-    if launching && message_data.maybe_group.is_none() {
-        println!("Warning: no group defined for launch! Setting timeout to {}ms",LAUNCH_TIMEOUT);
-    }
+    //~ let launching = message_data.query.iter().any(|q| q.is_wait());
+    //~ if launching && message_data.maybe_group.is_none() {
+        //~ println!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
+    //~ }
 
-    // we warn because launch gets a very fat default timeout...
-    let timeout = timeout::Timeout::new_shared(
-        if launching {LAUNCH_TIMEOUT} else {flags.timeout}
-    );
+
+    let timeout = timeout::Timeout::new_shared(flags.timeout);
 
     let msg_timeout = timeout.clone();
     let mut mc = m.callbacks(message_data);
@@ -794,6 +808,10 @@ fn run() -> BoxResult<bool> {
             } else {
                 // aha, there's another query in the pipeline...
                 data.seq += 1;
+                // Wait has VERY generous timeout...
+                if data.current_query().is_wait() {
+                    msg_timeout.lock().unwrap().set_timeout(LAUNCH_TIMEOUT);
+                }
                 data.send_query().unwrap();
             }
         }

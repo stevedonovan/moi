@@ -190,6 +190,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         let pwd = string_field(args,"pwd").unwrap_or(mdata.cfg.home());
         let pwd = massage_destination_path(&mdata.cfg,pwd.into());
         // check explicitly here because otherwise run_shell_command panics..
+        // TODO case where parent exists - don't join filename to dest
         (pwd.exists() && pwd.is_dir())
             .or_then_err(|| format!("run: dest does not exist {}",pwd.display()))?;
         if verb == "run" {
@@ -207,13 +208,24 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
             // patiently for them)
             // TODO put a timeout on this spawned process...
             let m = mdata.m.clone();
-            let seq = mdata.seq;
+            // DUBIOUS - MOI needs to track an _unsolicited_ response
+            // here.
+            let seq = mdata.seq + 1;
             let addr = mdata.cfg.addr().to_string();
+            let jobname = string_field(args,"job").unwrap_or("<none>").to_string();
             thread::spawn(move || {
                 let (code, stdout, stderr) = run_shell_command(&cmd,Some(&pwd));
                 let res = object!{"code" => code, "stdout" => stdout, "stderr" => stderr};
-                let resp = MsgData::ok_result_build(res,addr,seq);
-                m.publish("MOI/result/process",resp.to_string().as_bytes(),1,false).unwrap();
+                if jobname == "<none>" {
+                    // MOI is waiting for us most patiently...
+                    let resp = MsgData::ok_result_build(res,addr,seq);
+                    m.publish("MOI/result/process",resp.to_string().as_bytes(),1,false).unwrap();
+                } else {
+                    // WEIRD we need to save the results of the job asynchronously
+                    // so send a payload to OURSELF so the mosq msg handler can do the writing
+                    let resp = array![jobname.as_str(),res];
+                    m.publish(&action_me_topic(&addr),resp.to_string().as_bytes(),1,false).unwrap();
+                }
             });
             Ok(JsonValue::from(true))
         }
@@ -307,6 +319,10 @@ fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     Ok(res)
 }
 
+fn action_me_topic(addr: &str) -> String {
+    format!("MOI/pvt/store/{}",addr)
+}
+
 fn run() -> BoxResult<()> {
     let file = std::env::args().nth(1).or_err("provide a config file")?;
     if file == "--version" {
@@ -329,7 +345,7 @@ fn run() -> BoxResult<()> {
     let query_me = m.subscribe( // for speaking directly to us...
             &format!("{}/{}",QUERY_TOPIC,config.addr()),
         1)?;
-    let action_me = m.subscribe(&format!("MOI/pvt/store/{}",config.addr()),1)?;
+    let action_me = m.subscribe(&action_me_topic(&config.addr()),1)?;
     let quit = m.subscribe(QUIT_TOPIC,1)?;
     let mut mc = m.callbacks(MsgData::new(config,&m));
 
@@ -385,7 +401,15 @@ fn run() -> BoxResult<()> {
             m.unsubscribe(msg.topic()).unwrap();
         } else
         if action_me.matches(&msg) {
-
+            // this is a kludge. We send _ourselves_ some data
+            // to be written to the store directly
+            // These unwraps look bad and are evil
+            let json = json::parse(msg.text()).unwrap();
+            //println!("got {} -> {}",msg.text(),json);
+            let key = json[0].as_str().unwrap();
+            let value = &json[1];
+            mdata.cfg.insert(key,value);
+            mdata.cfg.write().unwrap();
         } else
         if quit.matches(&msg) {
             m.disconnect().unwrap();

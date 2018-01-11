@@ -18,6 +18,10 @@ impl Timeout {
         Arc::new(Mutex::new(Timeout::new(timeout)))
     }
 
+    pub fn set_timeout(&mut self, timeout: i32) {
+        self.timeout = Duration::from_millis(timeout as u64)
+    }
+
     pub fn update(&mut self) {
         self.last_msg_time = Instant::now();
     }
