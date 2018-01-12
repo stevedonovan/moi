@@ -1,5 +1,5 @@
 use std::time::{Instant,Duration};
-use std::sync::{Mutex,Arc};
+use moi::*;
 
 pub struct Timeout {
     last_msg_time: Instant,
@@ -14,8 +14,8 @@ impl Timeout {
         }
     }
 
-    pub fn new_shared(timeout: i32) -> Arc<Mutex<Timeout>> {
-        Arc::new(Mutex::new(Timeout::new(timeout)))
+    pub fn new_shared(timeout: i32) -> SharedPtr<Timeout> {
+        make_shared(Timeout::new(timeout))
     }
 
     pub fn set_timeout(&mut self, timeout: i32) {

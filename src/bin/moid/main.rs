@@ -1,12 +1,13 @@
 // MOI remote daemon
 #[macro_use] extern crate json;
 extern crate mosquitto_client;
-extern crate moi;
+#[macro_use] extern crate moi;
 
 const VERSION: &str = "0.1.1";
 
 use mosquitto_client::{Mosquitto,MosqMessage};
 use json::JsonValue;
+
 use moi::*;
 
 // we don't do Windows for now, sorry
@@ -24,7 +25,7 @@ const QUERY_TOPIC: &str = "MOI/query";
 const QUIT_TOPIC: &str = "MOI/quit";
 
 struct MsgData {
-    cfg: Config,
+    cfg: SharedPtr<Config>,
     seq: u8,
     m: Mosquitto,
     pending_buffer: Option<Vec<u8>>,
@@ -33,7 +34,7 @@ struct MsgData {
 impl MsgData {
     fn new(cfg: Config, m: &Mosquitto) -> MsgData {
         MsgData {
-            cfg: cfg,
+            cfg: make_shared(cfg),
             seq: 0,
             m: m.clone(),
             pending_buffer: None,
@@ -50,11 +51,11 @@ impl MsgData {
     }
 
     pub fn ok_result(&self, v: JsonValue) -> JsonValue {
-        MsgData::ok_result_build(v, self.cfg.addr().into(), self.seq)
+        MsgData::ok_result_build(v, lock!(self.cfg).addr().into(), self.seq)
     }
 
     pub fn error_result(&self, msg: &str) -> JsonValue {
-        object! {"id" => self.cfg.addr(), "seq" => self.seq, "error" => msg}
+        object! {"id" => lock!(self.cfg).addr(), "seq" => self.seq, "error" => msg}
     }
 
 }
@@ -154,8 +155,32 @@ fn massage_destination_path(cfg: &Config, dest: String) -> PathBuf {
     }
 }
 
+fn write_result_code(pcfg: &SharedPtr<Config>, code: i32)  {
+   let mut cfg = lock!(pcfg);
+   cfg.values.insert("rc".into(),code.into());
+}
+
+use std::time::{Duration};
+
+fn cancel_result_code(pcfg: &SharedPtr<Config>)  {
+    let cfg = pcfg.clone();
+    let timeout = Duration::from_millis(1000);
+    thread::spawn(move || {
+        thread::sleep(timeout);
+        write_result_code(&cfg,0);
+    });    
+}
+
+fn handle_result_code(pcfg: &SharedPtr<Config>, code: i32) {
+    if code != 0 {                    
+        write_result_code(pcfg,code);
+        cancel_result_code(pcfg);
+    }    
+}     
+
 fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<JsonValue> {
     if verb == "get" {
+        let cfg = lock!(mdata.cfg);
         // get a list of keys
         let mut res = JsonValue::new_array();
         for s in args.members() {
@@ -164,34 +189,41 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
                 res.push(val)?;
             } else {
                 // but we return Null if not-found
-                res.push(mdata.cfg.get_or(s,JsonValue::Null).clone())?;
+                res.push(cfg.get_or(s,JsonValue::Null).clone())?;
             }
         }
         Ok(res)
     } else
     if verb == "set" {
+        let mut cfg = lock!(mdata.cfg);
         // set keys on this device
         for (key,val) in args.entries() {
-            mdata.cfg.insert(key, val);
+            cfg.insert(key, val);
         }
         // we persist the values immediately...
-        mdata.cfg.write()?;
+        cfg.write()?;
         Ok(JsonValue::from(true))
     } else
     if verb == "seta" || verb == "rma" {
+        let mut cfg = lock!(mdata.cfg);
         // these both modify array-valued keys - rma removes
         // a value from the array if present
         for (key,val) in args.entries() {
-            mdata.cfg.insert_array(key, val, verb == "rma")?;
+            cfg.insert_array(key, val, verb == "rma")?;
         }
-        mdata.cfg.write()?;
+        cfg.write()?;
         Ok(JsonValue::from(true))
     } else
     if verb == "run" || verb == "launch" || verb == "spawn" {
         // global tilde substitution needed for standalone tests PASOP
-        let cmd = string_field(args,"cmd")?.replace('~',&mdata.cfg.home());
-        let pwd = string_field(args,"pwd").unwrap_or(mdata.cfg.home());
-        let pwd = massage_destination_path(&mdata.cfg,pwd.into());
+        let (cmd,pwd) = {
+            let cfg = lock!(mdata.cfg);
+            let home = cfg.home();
+            let cmd = string_field(args,"cmd")?.replace('~',home);
+            let pwd = string_field(args,"pwd").unwrap_or(home);
+            let pwd = massage_destination_path(&cfg,pwd.into());
+            (cmd,pwd)
+        };
         // check explicitly here because otherwise run_shell_command panics..
         // TODO case where parent exists - don't join filename to dest
         (pwd.exists() && pwd.is_dir())
@@ -199,6 +231,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         if verb == "run" {
             // we Wait....
             let (code, stdout, stderr) = run_shell_command(&cmd,Some(&pwd));
+            handle_result_code(&mdata.cfg,code);
             Ok(object!{"code" => code, "stdout" => stdout, "stderr" => stderr})
         } else
         if verb == "spawn" {
@@ -214,7 +247,8 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
             // DUBIOUS - MOI needs to track an _unsolicited_ response
             // here.
             let seq = mdata.seq + 1;
-            let addr = mdata.cfg.addr().to_string();
+            let addr = lock!(mdata.cfg).addr().to_string();
+            let shared_cfg = mdata.cfg.clone();
             let jobname = string_field(args,"job").unwrap_or("<none>").to_string();
             thread::spawn(move || {
                 let (code, stdout, stderr) = run_shell_command(&cmd,Some(&pwd));
@@ -224,11 +258,13 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
                     let resp = MsgData::ok_result_build(res,addr,seq);
                     m.publish("MOI/result/process",resp.to_string().as_bytes(),1,false).unwrap();
                 } else {
-                    // WEIRD we need to save the results of the job asynchronously
-                    // so send a payload to OURSELF so the mosq msg handler can do the writing
-                    let resp = array![jobname.as_str(),res];
-                    m.publish(&action_me_topic(&addr),resp.to_string().as_bytes(),1,false).unwrap();
+                    // not waiting, so we put the result into the store using jobname
+                    let mut cfg = lock!(shared_cfg);
+                    cfg.insert(&jobname,&res);
+                    cfg.write().unwrap();
                 }
+                // either way, flag 'rc' if we failed!
+                handle_result_code(&shared_cfg,code);
             });
             Ok(JsonValue::from(true))
         }
@@ -241,7 +277,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         // which contains the actual bytes.
         let filename = string_field(args,"filename")?;
         let dest = string_field(args,"dest")?.to_string();
-        let dest: PathBuf =  massage_destination_path(&mdata.cfg,dest);
+        let dest: PathBuf =  massage_destination_path(&lock!(mdata.cfg),dest);
 
         let maybe_perms = &args["perms"];
         let perms = if ! maybe_perms.is_null() {
@@ -253,7 +289,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
             None
         };
         writeable_directory(&dest)?;
-        mdata.cfg.pending_file = Some(FilePending {
+        lock!(mdata.cfg).pending_file = Some(FilePending {
             filename: filename.into(),
             dest: dest.join(filename),
             perms: perms
@@ -262,7 +298,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         Ok(JsonValue::from(true))
     } else
     if verb == "fetch" {
-        let source = massage_destination_path(&mdata.cfg,string_field(args,"source")?.into());
+        let source = massage_destination_path(&lock!(mdata.cfg),string_field(args,"source")?.into());
         source.exists().or_then_err(|| format!("remote source {} does not exist",source.display()))?;
         mdata.pending_buffer = Some(read_to_buffer(&source)?);
         Ok(JsonValue::from(true))
@@ -293,7 +329,7 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
     mdata.seq = query["seq"].as_u8().or_err("bad seq")?;
     if let Some((how,condn)) = query["which"].entries().next() {
         // is this query intended for us?
-        let yes = match_condition(&mdata.cfg,how,condn)?;
+        let yes = match_condition(&lock!(mdata.cfg),how,condn)?;
         if ! yes { // not for us!
             return Ok(JsonValue::Null);
         }
@@ -304,7 +340,7 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
 }
 
 fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
-    let res = if let Some(ref file) = mdata.cfg.pending_file {
+    let res = if let Some(ref file) = lock!(mdata.cfg).pending_file {
         //println!("copying");
         let payload = msg.payload();
         let mut oo = fs::OpenOptions::new();
@@ -318,12 +354,8 @@ fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     } else {
         false
     };
-    mdata.cfg.pending_file = None; // done!
+    lock!(mdata.cfg).pending_file = None; // done!
     Ok(res)
-}
-
-fn action_me_topic(addr: &str) -> String {
-    format!("MOI/pvt/store/{}",addr)
 }
 
 fn run() -> BoxResult<()> {
@@ -337,7 +369,10 @@ fn run() -> BoxResult<()> {
     config.values.insert("arch".into(),env::consts::ARCH.into());
     if ! config.values.contains_key("bin") {
         config.values.insert("bin".into(),"/usr/local/bin".into());
-    }    
+    }
+    if ! config.values.contains_key("rc") {
+        config.values.insert("rc".into(),0.into());
+    }
 
     // VERY important that mosquitto client name is unique, otherwise Mosquitto has kittens
     let mosq_name = format!("MOID-{}",&config.addr());
@@ -351,7 +386,6 @@ fn run() -> BoxResult<()> {
     let query_me = m.subscribe( // for speaking directly to us...
             &format!("{}/{}",QUERY_TOPIC,config.addr()),
         1)?;
-    let action_me = m.subscribe(&action_me_topic(&config.addr()),1)?;
     let quit = m.subscribe(QUIT_TOPIC,1)?;
     let mut mc = m.callbacks(MsgData::new(config,&m));
 
@@ -361,10 +395,13 @@ fn run() -> BoxResult<()> {
         if query.matches(&msg) || query_me.matches(&msg) {
             let res = match handle_query(mdata,msg.text()) {
                 Ok(v) =>  mdata.ok_result(v),
-                Err(e) => mdata.error_result(e.description())
+                Err(e) => {
+                   // handle_result_code(&mdata.cfg,1); //??
+                    mdata.error_result(e.description())
+                }
             };
             if res != JsonValue::Null { // only tell mother about queries intended for us
-                if let Some(ref _pending_file) = mdata.cfg.pending_file {
+                if let Some(ref _pending_file) = lock!(mdata.cfg).pending_file {
                     let topic = &format!("MOI/file/{}",mdata.seq);
                     //println!("pending {} subscribing {:?}",topic,pending_file);
                     m.subscribe(&topic,1).unwrap();
@@ -372,10 +409,11 @@ fn run() -> BoxResult<()> {
                 // the response to "fetch" is a special snowflake
                 // successful response is just the bytes of the file
                 let file_fetching = if let Some(ref buffer) = mdata.pending_buffer {
+                    let cfg = lock!(mdata.cfg);
                     let topic = format!("MOI/fetch/{}/{}/{}",
                         mdata.seq,
-                        mdata.cfg.addr(),
-                        mdata.cfg.name()
+                        cfg.addr(),
+                        cfg.name()
                     );
                     m.publish(&topic,buffer,1,false).unwrap();
                     true
@@ -405,18 +443,8 @@ fn run() -> BoxResult<()> {
                 eprintln!("file response failed {}",e);
             }
             m.unsubscribe(msg.topic()).unwrap();
-        } else
-        if action_me.matches(&msg) {
-            // this is a kludge. We send _ourselves_ some data
-            // to be written to the store directly
-            // These unwraps look bad and are evil
-            let json = json::parse(msg.text()).unwrap();
-            //println!("got {} -> {}",msg.text(),json);
-            let key = json[0].as_str().unwrap();
-            let value = &json[1];
-            mdata.cfg.insert(key,value);
-            mdata.cfg.write().unwrap();
-        } else
+        }
+        
         if quit.matches(&msg) {
             m.disconnect().unwrap();
         }

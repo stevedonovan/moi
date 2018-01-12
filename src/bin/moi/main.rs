@@ -4,6 +4,7 @@ extern crate mosquitto_client;
 extern crate lapp;
 extern crate toml;
 // our own common crate (shared with daemon)
+#[macro_use]
 extern crate moi;
 
 use moi::*;
@@ -605,7 +606,7 @@ fn query_alias_collect(t: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, re
     if let Some(group) = gets(t,"group")? {
         flags.group_name = group.into();
     }
-    if let Some(group) = t.get("quiet") {
+    if let Some(_) = t.get("quiet") {
         flags.quiet = true;
     }
     
@@ -757,7 +758,7 @@ fn run() -> BoxResult<bool> {
     let msg_timeout = timeout.clone();
     let mut mc = m.callbacks(message_data);
     mc.on_message(|data,msg| {
-        msg_timeout.lock().unwrap().update(); // feed the watchdog
+        lock!(msg_timeout).update(); // feed the watchdog
         if query_resp.matches(&msg) {
             let mut seq = 0;
             let (id,success,resp) = MessageData::parse_response(msg.text(),&mut seq);
@@ -822,7 +823,7 @@ fn run() -> BoxResult<bool> {
                 data.seq += 1;
                 // Wait has VERY generous timeout...
                 if data.current_query().is_wait() {
-                    msg_timeout.lock().unwrap().set_timeout(LAUNCH_TIMEOUT);
+                    lock!(msg_timeout).set_timeout(LAUNCH_TIMEOUT);
                 }
                 data.send_query().unwrap();
             }
@@ -838,7 +839,7 @@ fn run() -> BoxResult<bool> {
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_millis(50));
-            if timeout.lock().unwrap().timed_out() {
+            if lock!(timeout).timed_out() {
                 // errors! Should bail out more elegantly here...
                 thread_m.publish(TIMEOUT_TOPIC,b"",1,false).unwrap();
             }

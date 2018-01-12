@@ -56,6 +56,18 @@ impl OrErr<()> for bool {
     }
 }
 
+use std::sync::{Mutex,Arc};
+pub type SharedPtr<T> = Arc<Mutex<T>>;
+
+#[macro_export]
+macro_rules! lock {
+    ($m:expr) => ($m.lock().unwrap())
+}
+
+pub fn make_shared<T> (t: T) -> SharedPtr<T> {
+    Arc::new(Mutex::new(t))
+}
+
 pub fn current_time_as_secs() -> i64 {
     let now = time::SystemTime::now();
     now.duration_since(time::UNIX_EPOCH).unwrap().as_secs() as i64
