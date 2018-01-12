@@ -2,17 +2,24 @@ use toml;
 use moi::*;
 use std::path::Path;
 
-pub fn gets_or<'a>(config: &'a toml::Value, key: &str, def: &'static str) -> BoxResult<&'a str> {
+pub fn gets<'a>(config: &'a toml::Value, key: &str) -> BoxResult<Option<&'a str>> {
     Ok(match config.get(key) {
-        None => def,
-        Some(v) => v.as_str().or_then_err(|| format!("value of '{}' not a string",key))?
+        None => None,
+        Some(v) => Some(v.as_str().or_then_err(|| format!("value of '{}' is not a string",key))?)
+    })    
+}
+
+pub fn gets_or<'a>(config: &'a toml::Value, key: &str, def: &'static str) -> BoxResult<&'a str> {
+    Ok(match gets(config,key)? {
+        Some(res) => res,
+        None => def
     })
 }
 
 pub fn geti_or(config: &toml::Value, key: &str, def: i64) -> BoxResult<i64> {
     Ok(match config.get(key) {
         None => def,
-        Some(v) => v.as_integer().or_then_err(|| format!("value of '{}' not an integer",key))?
+        Some(v) => v.as_integer().or_then_err(|| format!("value of '{}' is not an integer",key))?
     })
 }
 

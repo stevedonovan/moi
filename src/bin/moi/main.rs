@@ -599,12 +599,16 @@ fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) 
 fn query_alias_collect(t: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, res: &mut Vec<Query>) -> BoxResult<()> {
     // either the filter or the group can be overriden, but currently only in the first command
     // of a sequence
-    if let Some(filter) = t.get("filter") {
-        flags.filter_desc = filter.as_str().or_err("filter must be string")?.into();
+    if let Some(filter) = gets(t,"filter")? {
+        flags.filter_desc = filter.into();
     } else
-    if let Some(group) = t.get("group") {
-        flags.group_name = group.as_str().or_err("group must be string")?.into();
+    if let Some(group) = gets(t,"group")? {
+        flags.group_name = group.into();
     }
+    if let Some(group) = t.get("quiet") {
+        flags.quiet = true;
+    }
+    
     // it's a cool thing to help people.
     let help = gets_or(t,"help","<no help>")?;
     // there may be multiple stages, so sections [commands.NAME.1], [commands.NAME.2]... etc in config
