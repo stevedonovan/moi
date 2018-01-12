@@ -125,6 +125,9 @@ fn special_destination_prefix(cfg: &Config, starts: &str) -> PathBuf {
             }
         }
         tmp
+    } else
+    if starts == "bin" {
+        cfg.gets("bin").unwrap().into()        
     } else {
         starts.into()
     }
@@ -332,6 +335,9 @@ fn run() -> BoxResult<()> {
     let mut config = Config::new_from_file(&PathBuf::from(file))?;
     config.values.insert("moid".into(),VERSION.into());
     config.values.insert("arch".into(),env::consts::ARCH.into());
+    if ! config.values.contains_key("bin") {
+        config.values.insert("bin".into(),"/usr/local/bin".into());
+    }    
 
     // VERY important that mosquitto client name is unique, otherwise Mosquitto has kittens
     let mosq_name = format!("MOID-{}",&config.addr());
