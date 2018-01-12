@@ -35,7 +35,7 @@ const LAUNCH_TIMEOUT:i32 = 20000;
 const USAGE: &str = "
 Execute commands on devices
   -V, --version version of MOI
-  -c, --config (path default ~/.moi/config.toml) configuration file
+  -c, --config (path default ~/.local/moi/config.toml) configuration file
   -f, --filter (default none) only for the selected devices
             KEY test for existence of key
             KEY=VALUE  test for equality
@@ -90,11 +90,11 @@ impl Flags {
             std::process::exit(0);
         }
 
-        let moi_dir = env::home_dir().unwrap().join(".moi");
+        let moi_dir = env::home_dir().unwrap().join(".local").join("moi");
         let default_config = moi_dir.join("config.toml");
         let json_store = moi_dir.join("store.json");
         if ! moi_dir.exists() {
-            fs::create_dir(&moi_dir)?;
+            fs::create_dir_all(&moi_dir)?;
             write_all(&default_config,"[config]\nmqtt_addr = \"localhost\"\n")?;
             write_all(&json_store,"{}\n")?;
             println!("Creating {}.\nEdit mqtt_addr if necessary",default_config.display());
