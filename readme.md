@@ -3,6 +3,11 @@
 `moi` came about from a need to manage private networks of embedded Linux devices.
 We were already using MQTT with Mosquitto for data passing, so it made sense
 to continue using it as the transport layer for a device management system.
+MQTT involes a broker where clients can _subscribe_ to topics, and _publish_
+values to topics. The actual payload contents can be anything. In the case of `moi`,
+we publish queries to a topic which all the remotes are listening to; queries
+consist of a _filter_ and a _command_ expressed in JSON. They then respond
+with a JSON result.
 
 We had been investigating Salt Stack in a similar context, and `moi` is in
 some ways a reaction to Salt: small, focussed, assuming that the remote
@@ -25,7 +30,7 @@ configuration file in TOML format.
 
 ```
 moi$ moi ls
-Creating /home/steve/.moi/config.toml.
+Creating /home/steve/.local/moi/config.toml.
 Edit mqtt_addr if necessary
 10.10.10.10	frodo
 10.10.10.22	merry
@@ -56,15 +61,15 @@ Operations filter on keys. There is equality and "starts with"
 it - it does not receive special expansion by the shell)
 
 ```
-moi$ moi -f addr=10.10.10.10 ls
+moi$ moi --filter addr=10.10.10.10 ls
 10.10.10.10	frodo
 
-moi$ moi -f addr=10.10.10.1# ls
+moi$ moi --filter addr=10.10.10.1# ls
 10.10.10.10	frodo
 10.10.10.11	bilbo
 ```
 There is a slight delay when executing these commands, because a timeout
-is used when collecting all the responses (you can use `--timeout` to
+is used when collecting all the responses (you can use `--timeout`(`-T`) to
 specify a different value in milliseconds.)
 
 It's recommended to immediately create the "all" _group_. "all" is considered
@@ -82,12 +87,12 @@ group all created:
 10.10.10.22	merry
 10.10.10.11	bilbo
 
-moi$ moi -f addr=10.10.10.1# group baggins
+moi$ moi --filter addr=10.10.10.1# group baggins
 group baggins created:
 10.10.10.11	bilbo
 10.10.10.10	frodo
 
-moi$ moi -g all ls
+moi$ moi --group all ls
 10.10.10.23	pippin
 10.10.10.22	merry
 10.10.10.10	frodo
@@ -227,7 +232,7 @@ moi$ jessie ls sleep-job
 moi$ jessie ls sleep-job.code
 192.168.0.13	jessie	0
 scratch$ # can use in a condition...
-scratch$ moi -f sleep-job.code=0 ls192.168.0.13	jessie
+scratch$ moi -f 'all name="jessie" sleep-job.code=0' ls
 192.168.0.13	jessie
 
 ```
@@ -324,20 +329,24 @@ filter = "name=jessie"
 It's a matter of taste and convenience whether it's a standalone alias,
 or inside the main config TOML.
 
-Aliases can do argument substitution. Say we really liked the `push-run`
-approach but found it involved too much typing:
+Aliases can do argument substitution. The `push-run`
+pattern for running a script remotely is powerful but it involves repetitive typing:
+
+```
+scratch$ moi -f name=jessie push-run space tmp './space'
+```
+Any arguments to the custom command can be substituted using usual `$` notation.
 
 ```
 scratch$ tail -n4 ~/.moi/config.toml
 [commands.pushr]
 help = "push and run a script"
 command = "push-run"
-args=["%1","tmp","./%1"]
+args=["$1","tmp","./$1"]
 
 scratch$ moi -f name=jessie pushr space
 192.168.0.13	jessie	18G
 ```
-
 It is possible to do multistage aliases, which are full-blown recipes:
 
 ```toml
@@ -359,16 +368,13 @@ args = []
 
 [4]
 command = "set"
-args = ["%1@package=%1@version"]
+args = ["$(1:package)=$(1:version)"]
 
 ```
-Percent-substitutions in aliases can be followed by "@op" - (this notation is not
-the prettiest and may be changed.)
-
+Substitutions in aliases are either `$N`, `$(N)` or `$(N:OP)`.
 The last line sets a key (made out of the package name) to a value (the package version);
-we define a package name is everything up to the first dash or underscore followed by
-a digit.
-
+we define a package name as everything up to the first dash or underscore that is 
+followed by a digit.
 
 ```
 scratch$ alias jessie='moi -f name=jessie'
@@ -423,6 +429,55 @@ suitable name.
 ```
 $ moi push moid-0.1.2 self :: restart
 ```
+The ease of updating `moid` as a single executable with no dependencies
+makes it a good candidate for _customization_. So the idea is to provide
+straightforward documented ways for statically linking extra functionality
+into `moid`.
 
+## A Start at Documentation
 
+### Keys
+
+These are the keys always available from the remote:
+
+  - `name`  settable, invoke `hostname` otherwise
+  - `addr`  settable, look for non-local IP4 addresses otherwise.
+     Can specify `interface` in `moid` JSON config if there are 
+     multiple interfaces
+  - `time` time at the remote as Unix timestamp
+  - `arch` processor architecture
+  - `moid` version of `moid` running
+  
+Keys may consist of alphanumeric characters, plus underscore and dash.
+Periods are not valid!
+  
+### Filters
+
+Here are the basic filters:
+
+   - `KEY=VALUE` test for (string) equality
+   - `KEY=VALUE#` true if first part matches up to #
+   - `KEY:VALUE`  true if value is found in the _array-valued_ key
+     `KEY`. (So "groups:all" matches all devices which belong to the "all"
+     group)
+   - `KEY`  true if the key exists at all
+   - `KEY.not.VALUE` inequality test
+   
+These may be combined, so "--filter 'all A=1 B=2'" matches if all conditions
+are true, whereas "--filter 'any A=1 B=2'" matches if any condition is true.
+
+"--group NAME" counts as a filter, although there is some special sauce
+involved. `moi` will stop listening as soon as all members of a group have
+replied, and will complain bitterly about members that do not reply within
+the specified timeout.  A single-remote filter like "addr=ADDR" or "name=NAME"
+counts as a group operation - i.e. it is an error for the remote not to reply.
+
+### Special Destinations
+
+Generally it's a good idea to let the remotes have preferences for special
+directories like their home, where `moid` lives, the temporary dir and 
+the desired location for programs. These work with the file operations and
+the remote-command operations. So instead of pushing a file to "/tmp", you
+just say "tmp" and let the remote handle the details. Simularly, we have
+"home", "bin" and "self" (which is `moid` location).
 
