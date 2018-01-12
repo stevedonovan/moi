@@ -327,12 +327,14 @@ impl MessageData {
         let output = if code == 0 {stdout} else {stderr};
         let multiline = output.find('\n').is_some();
         let (delim,post) = if multiline {(":\n","\n")} else {("\t","")};
-        print!("{}\t{}{}",id,self.lookup_name(id),delim);
+        let name = self.lookup_name(id);
         if code == 0 {
-            println!("{}{}",output,post);
+            if ! self.quiet {
+                println!("{}\t{}{}{}{}",id,name,delim,output,post);
+            }
             true
         } else {
-            println!("(code {}): {}{}",code,output,post);
+            println!("{}\t{}{}(code {}): {}{}",id,name,delim,code,output,post);
             // important: failed remote commands must count as failures
             false
         }
@@ -459,9 +461,12 @@ impl MessageData {
             let group = &self.group;
             let responses = &self.responses;
             let mut ok = true;
-            for (id,_) in responses {
+            for (id,success) in responses {
                 if let None = group.get(id) {
                     println!("note: id {} not in group {}", id, group_name);
+                }
+                if ! success {
+                    ok = false;
                 }
             }
             for (id,name) in group {
@@ -609,7 +614,7 @@ fn query_alias_collect(t: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, re
     if let Some(_) = t.get("quiet") {
         flags.quiet = true;
     }
-    
+
     // it's a cool thing to help people.
     let help = gets_or(t,"help","<no help>")?;
     // there may be multiple stages, so sections [commands.NAME.1], [commands.NAME.2]... etc in config
@@ -737,7 +742,7 @@ fn run() -> BoxResult<bool> {
             println!("note: ignoring --filter when --group is present");
         }
         let jgroup = lookup_group(&store, &flags.group_name)?;
-        flags.filter_desc = format!("groups:{}",flags.group_name);
+        flags.filter_desc = format!("all groups:{} rc=0",flags.group_name);
         message_data.set_group(&flags.group_name,jgroup);
     }
     let filter = Condition::from_description(&flags.filter_desc);
