@@ -13,22 +13,25 @@ pub fn split_at_delim<'a>(txt: &'a str, delim: &str) -> Option<(&'a str,&'a str)
     }
 }
 
-pub fn replace_percent_patterns<F>(text: &str, lookup: F) -> BoxResult<String>
+pub fn replace_percent_patterns<F>(text: &str, startc: char, lookup: F) -> BoxResult<String>
 where F: Fn(String,Option<String>) -> BoxResult<String> {
+    const NO_CLOSING: &str = "no closing parens";
     let mut s = text;
     let mut res = String::new();
-    while let Some(pos) = s.find('%') {
+    while let Some(pos) = s.find(startc) {
         res.push_str(&s[0..pos]);
-        s = &s[pos+1..]; // skip %
-        let mut chars = s.chars();
-        let ch = chars.next().or_then_err(|| format!("% at end of subst"))?;
-        // %{idx} may be followed by @{op}
+        s = &s[pos+1..]; // skip $ or %
+        let mut chars = s.chars();        
+        // Either $N, 
         let mut extra = None;
         let mut skip = 1;
-        if let Some(maybe_at) = chars.next() {
-            if maybe_at == '@' {
-                let kind: String = chars.take_while(|c| c.is_alphabetic()).collect();
-                skip += kind.len() + 1;
+        let mut ch = chars.next().or_then_err(|| format!("{} at end of subst",startc))?;
+        if ch == '(' { // $(N) or $(N:OP)             
+            ch = chars.next().or_err(NO_CLOSING)?;
+            let next = chars.next().or_err(NO_CLOSING)?;
+            if next == ':' {
+                let kind: String = chars.take_while(|&c| c != ')').collect();
+                skip += kind.len() + 3; // +1 for )
                 extra = Some(kind);
             }
         }
@@ -41,7 +44,7 @@ where F: Fn(String,Option<String>) -> BoxResult<String> {
 }
 
 pub fn replace_percent_destination(text: &str, addr: &str, name: &str) -> BoxResult<String> {
-    replace_percent_patterns(text, |s,_| {
+    replace_percent_patterns(text, '%', |s,_| {
         Ok (
             if s == "a" {
                 addr.into()
@@ -74,15 +77,19 @@ fn massage_valid_key(name: &str) -> String {
     name.chars().filter(|&c| c != '.').collect()
 }
 
-pub fn replace_percent_args(text: &str, args: &[String]) -> BoxResult<String> {
-    replace_percent_patterns(text, |s,x| {
+pub fn replace_dollar_args(text: &str, args: &[String]) -> BoxResult<String> {
+    replace_percent_patterns(text, '$', |s,x| {
         let idx: usize = s.parse()?;
         (idx <= args.len()).or_then_err(|| format!("index %{} out of range: ({} arguments given)",idx,args.len()))?;
         let arg = args[idx-1].clone();
         if let Some(kind) = x {
             if kind == "package" {
                 if let Some((name,_)) = split_version(&arg) {
-                    return Ok(massage_valid_key(name));
+                    let massaged = massage_valid_key(name);
+                    if massaged != name {
+                        println!("warning: package '{}' replaced with valid key '{}",name,massaged);
+                    }
+                    return Ok(massaged);
                 }
             } else
             if kind == "version" {
@@ -106,10 +113,10 @@ pub fn replace_percent_args(text: &str, args: &[String]) -> BoxResult<String> {
     })
 }
 
-pub fn replace_percent_args_array(strings: &[String], args: &[String]) -> BoxResult<Vec<String>> {
+pub fn replace_dollar_args_array(strings: &[String], args: &[String]) -> BoxResult<Vec<String>> {
     let mut res = Vec::new();
     for text in strings.iter() {
-        res.push(replace_percent_args(text,args)?);
+        res.push(replace_dollar_args(text,args)?);
     }
     Ok(res)
 }

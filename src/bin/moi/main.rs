@@ -587,7 +587,7 @@ fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) 
     let alias_args = toml_strings(def.get("args").or_err("alias: args must be defined")?
         .as_array().or_err("alias: args must be array")?
     )?;
-    let alias_args = strutil::replace_percent_args_array(&alias_args,&cmd.arguments)
+    let alias_args = strutil::replace_dollar_args_array(&alias_args,&cmd.arguments)
         .map_err(|e| io_error(&format!("{} {} {}",cmd.command, help, e)))?;
 
     if flags.verbose {
