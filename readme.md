@@ -373,8 +373,12 @@ args = ["$(1:package)=$(1:version)"]
 ```
 Substitutions in aliases are either `$N`, `$(N)` or `$(N:OP)`.
 The last line sets a key (made out of the package name) to a value (the package version);
-we define a package name as everything up to the first dash or underscore that is 
+we define a package name as everything up to the first dash or underscore that is
 followed by a digit.
+
+A feature of multistage commands is that commands like `launch` and `run` set the special
+`rc` variable - if non-zero, subsequent commands will not run. So in this case we can
+be sure that the version is _only_ set if the install command succeeds.
 
 ```
 scratch$ alias jessie='moi -f name=jessie'
@@ -429,6 +433,25 @@ suitable name.
 ```
 $ moi push moid-0.1.2 self :: restart
 ```
+
+Here is the systemd equivalent, where the contents of `restart-moid` is
+the same as the post-stop script above:
+
+```
+[Unit]
+Description=MOI Remote Daemon
+After=multi-user.target
+
+[Service]
+WorkingDirectory=/usr/local/bin
+ExecStart=/usr/local/bin/moid /usr/local/etc/store.json
+Restart=always
+ExecStopPost=/usr/local/etc/restart-moid
+
+[Install]
+WantedBy=multi-user.target
+```
+
 The ease of updating `moid` as a single executable with no dependencies
 makes it a good candidate for _customization_. So the idea is to provide
 straightforward documented ways for statically linking extra functionality
@@ -442,15 +465,15 @@ These are the keys always available from the remote:
 
   - `name`  settable, invoke `hostname` otherwise
   - `addr`  settable, look for non-local IP4 addresses otherwise.
-     Can specify `interface` in `moid` JSON config if there are 
+     Can specify `interface` in `moid` JSON config if there are
      multiple interfaces
   - `time` time at the remote as Unix timestamp
   - `arch` processor architecture
   - `moid` version of `moid` running
-  
+
 Keys may consist of alphanumeric characters, plus underscore and dash.
 Periods are not valid!
-  
+
 ### Filters
 
 Here are the basic filters:
@@ -462,7 +485,7 @@ Here are the basic filters:
      group)
    - `KEY`  true if the key exists at all
    - `KEY.not.VALUE` inequality test
-   
+
 These may be combined, so "--filter 'all A=1 B=2'" matches if all conditions
 are true, whereas "--filter 'any A=1 B=2'" matches if any condition is true.
 
@@ -475,7 +498,7 @@ counts as a group operation - i.e. it is an error for the remote not to reply.
 ### Special Destinations
 
 Generally it's a good idea to let the remotes have preferences for special
-directories like their home, where `moid` lives, the temporary dir and 
+directories like their home, where `moid` lives, the temporary dir and
 the desired location for programs. These work with the file operations and
 the remote-command operations. So instead of pushing a file to "/tmp", you
 just say "tmp" and let the remote handle the details. Simularly, we have
