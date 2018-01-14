@@ -1,9 +1,10 @@
 // MOI remote daemon
+#[macro_use] extern crate log;
 #[macro_use] extern crate json;
-extern crate mosquitto_client;
 #[macro_use] extern crate moi;
+extern crate mosquitto_client;
 
-const VERSION: &str = "0.1.1";
+const VERSION: &str = "0.1.2";
 
 use mosquitto_client::{Mosquitto,MosqMessage};
 use json::JsonValue;
@@ -14,7 +15,7 @@ use moi::*;
 use std::os::unix::fs::OpenOptionsExt;
 use std::{io,fs,env};
 use std::io::prelude::*;
-use std::path::{PathBuf};
+use std::path::{Path,PathBuf};
 use std::thread;
 use std::time;
 
@@ -128,7 +129,7 @@ fn special_destination_prefix(cfg: &Config, starts: &str) -> PathBuf {
         tmp
     } else
     if starts == "bin" {
-        cfg.gets("bin").unwrap().into()        
+        cfg.gets("bin").unwrap().into()
     } else {
         starts.into()
     }
@@ -168,15 +169,15 @@ fn cancel_result_code(pcfg: &SharedPtr<Config>)  {
     thread::spawn(move || {
         thread::sleep(timeout);
         write_result_code(&cfg,0);
-    });    
+    });
 }
 
 fn handle_result_code(pcfg: &SharedPtr<Config>, code: i32) {
-    if code != 0 {                    
+    if code != 0 {
         write_result_code(pcfg,code);
         cancel_result_code(pcfg);
-    }    
-}     
+    }
+}
 
 fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<JsonValue> {
     if verb == "get" {
@@ -333,9 +334,11 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
         if ! yes { // not for us!
             return Ok(JsonValue::Null);
         }
+        info!("condition {} {}",how,condn);
     }
     let (verb,args) = query["what"].entries().next()
         .or_err("query must have 'what'")?;
+    info!("query {} {}",verb,args);
     handle_verb(mdata,verb,args)
 }
 
@@ -358,6 +361,27 @@ fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     Ok(res)
 }
 
+fn logging_init(cfg: &Config) -> BoxResult<()> {
+    let mut path;
+    let log_file = if let Some(file) = cfg.gets_opt("log_file")? {
+        path = PathBuf::from(file);
+        if path.is_dir() {
+            path = path.join("moid.log");
+        } else
+        if path.parent() == Some(Path::new("")) {
+            path = Path::new(&cfg.home()).join(path);
+        }
+        Some(path.as_path())
+    } else {
+        None
+    };
+    logging::init(
+        log_file,
+        cfg.gets_or("log_level","info")
+    )?;
+    Ok(())
+}
+
 fn run() -> BoxResult<()> {
     let file = std::env::args().nth(1).or_err("provide a config file")?;
     if file == "--version" {
@@ -374,14 +398,19 @@ fn run() -> BoxResult<()> {
         config.values.insert("rc".into(),0.into());
     }
 
+    logging_init(&config)?;
+
     // VERY important that mosquitto client name is unique, otherwise Mosquitto has kittens
     let mosq_name = format!("MOID-{}",&config.addr());
     let m = Mosquitto::new(&mosq_name);
-    m.connect_wait(
-        config.gets_or("mqtt_addr","127.0.0.1"),
-        config.geti_or("mqtt_port",1883)? as u32,
-        config.geti_or("mqtt_connect_timeout",200)?
-    )?;
+    {
+        let addr = config.gets_or("mqtt_addr","127.0.0.1");
+        let port = config.geti_or("mqtt_port",1883)? as u32;
+        let connect_timeout = config.geti_or("mqtt_connect_timeout",200)?;
+        m.connect_wait(addr,port,connect_timeout)?;
+        info!("connected to {}:{}", addr,port);
+    }
+
     let query = m.subscribe(QUERY_TOPIC,1)?;
     let query_me = m.subscribe( // for speaking directly to us...
             &format!("{}/{}",QUERY_TOPIC,config.addr()),
@@ -391,19 +420,22 @@ fn run() -> BoxResult<()> {
 
     mc.on_message(|mdata,msg| {
         // TODO error handling is still a mess
-        // TODO LOGGING and RETRYING
+        // TODO RETRYING
         if query.matches(&msg) || query_me.matches(&msg) {
             let res = match handle_query(mdata,msg.text()) {
-                Ok(v) =>  mdata.ok_result(v),
+                Ok(v) =>  {
+                    info!("seq {} resp {}",mdata.seq,v);
+                    mdata.ok_result(v)
+                },
                 Err(e) => {
-                   // handle_result_code(&mdata.cfg,1); //??
+                    error!("seq {} resp {}",mdata.seq,e);
                     mdata.error_result(e.description())
                 }
             };
             if res != JsonValue::Null { // only tell mother about queries intended for us
                 if let Some(ref _pending_file) = lock!(mdata.cfg).pending_file {
                     let topic = &format!("MOI/file/{}",mdata.seq);
-                    //println!("pending {} subscribing {:?}",topic,pending_file);
+                    info!("pending {} seq {}",topic,mdata.seq);
                     m.subscribe(&topic,1).unwrap();
                 }
                 // the response to "fetch" is a special snowflake
@@ -415,14 +447,15 @@ fn run() -> BoxResult<()> {
                         cfg.addr(),
                         cfg.name()
                     );
+                    info!("{} fetched {} bytes",topic,buffer.len());
                     m.publish(&topic,buffer,1,false).unwrap();
                     true
                 } else {
                     // But GENERALLY it is in nice JSON format
                     let payload = res.to_string();
                     if let Err(e) = m.publish("MOI/result/query",payload.as_bytes(),1,false) {
-                        // TODO: LOGGING and RECONNECTION!
-                        eprintln!("publish response failed {}",e);
+                        // TODO: RECONNECTION!
+                        error!("publish response failed {}", e);
                     }
                     false
                 };
@@ -440,11 +473,11 @@ fn run() -> BoxResult<()> {
                 Err(e) => mdata.error_result(e.description())
             }.to_string();
             if let Err(e) = m.publish("MOI/result/file",res.as_bytes(),1,false) {
-                eprintln!("file response failed {}",e);
+                error!("file response failed {}",e);
             }
             m.unsubscribe(msg.topic()).unwrap();
         }
-        
+
         if quit.matches(&msg) {
             m.disconnect().unwrap();
         }
@@ -456,6 +489,7 @@ fn run() -> BoxResult<()> {
 
 fn main() {
     if let Err(e) = run() {
+        // might not have logging up yet....??
         eprintln!("error: {}",e);
         std::process::exit(1);
     }

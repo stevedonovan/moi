@@ -3,6 +3,7 @@
 extern crate mosquitto_client;
 extern crate lapp;
 extern crate toml;
+#[macro_use] extern crate log;
 // our own common crate (shared with daemon)
 #[macro_use]
 extern crate moi;
@@ -13,10 +14,12 @@ mod strutil;
 mod commands;
 mod toml_utils;
 mod timeout;
+mod args;
 // mod output;
 
 use commands::*;
 use toml_utils::*;
+use args::{Flags,CommandArgs};
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
@@ -24,121 +27,12 @@ use json::JsonValue;
 use std::path::{Path,PathBuf};
 use std::time::{Instant,Duration};
 use std::collections::HashMap;
-use std::thread;
-use std::{fs,env,io};
+use std::{fs,io,thread};
 use std::io::prelude::*;
 //use std::fs::File;
 use std::error::Error;
 
-const VERSION: &str = "0.1.1";
 const LAUNCH_TIMEOUT:i32 = 20000;
-
-const USAGE: &str = "
-Execute commands on devices
-  -V, --version version of MOI
-  -c, --config (path default ~/.local/moi/config.toml) configuration file
-  -f, --filter (default none) only for the selected devices
-            KEY test for existence of key
-            KEY=VALUE  test for equality
-            KEY=VAL#   test for values that start with given string
-            KEY:VALUE  test whether value is in the array KEY
-            KEY.not.VALUE test for values not equal to VALUE
-  -g, --group (default none) for a predefined group
-  -T, --timeout (default 300) timeout for accessing all devices
-  -v, --verbose tell us all about what's going on...
-  -q, --quiet output only on error
-  -m, --message-format (default plain) one of plain,csv or json
-  <command> (string)
-        ls <keys>: display values of keys (defaults to 'addr','name')
-        run cmd [pwd]: run command remotely
-        launch cmd [pwd]: like run - use instead when command can take a long time
-        push file dest: copy a file to a remote destination
-        push-run file dest cmd: copy a file and run a command
-        pull file dest: copy remote files to us
-        run-pull cmd file dest: run a command and then copy the result
-        set key=value...:  set keys on remotes
-        seta key=value...: append values to array-valued keys
-        group name: create a group from the set of responses
-        remove-group: remove a named group from the set
-        groups: show defined groups
-        ping:  like ls, but gives round-trip time in msec
-        time:  like ls, but gives difference between this time and device time, in secs
-  <args> (string...) additional arguments for commands
-";
-
-#[derive(Clone)]
-struct CommandArgs {
-    command: String,
-    arguments: Vec<String>,
-}
-
-struct Flags {
-    filter_desc: String,
-    group_name: String,
-    config_file: PathBuf,
-    moi_dir: PathBuf,
-    json_store: PathBuf,
-    timeout: i32,
-    verbose: bool,
-    quiet: bool,
-   // format: String,
-}
-
-impl Flags {
-    fn new(args: &lapp::Args) -> BoxResult<(Vec<CommandArgs>,Flags)> {
-        if args.get_bool("version") {
-            println!("MOI comand-line interface version {}",VERSION);
-            std::process::exit(0);
-        }
-
-        let moi_dir = env::home_dir().unwrap().join(".local").join("moi");
-        let default_config = moi_dir.join("config.toml");
-        let json_store = moi_dir.join("store.json");
-        if ! moi_dir.exists() {
-            fs::create_dir_all(&moi_dir)?;
-            write_all(&default_config,"[config]\nmqtt_addr = \"localhost\"\n")?;
-            write_all(&json_store,"{}\n")?;
-            println!("Creating {}.\nEdit mqtt_addr if necessary",default_config.display());
-        }
-
-        let command = args.get_string("command");
-        let mut arguments = args.get_strings("args");
-        arguments.insert(0,command);
-
-        let mut commands = Vec::new();
-        {
-            let mut push = |mut aa: Vec<String>| {
-                if aa.len() == 0 { args.quit("must have at least one value after ::"); }
-                commands.push(CommandArgs{command: aa.remove(0), arguments: aa});
-            };
-            let mut this_chunk = Vec::new();
-            for s in arguments {
-                if s == "::" {
-                    let mut tmp = Vec::new();
-                    std::mem::swap(&mut this_chunk, &mut tmp);
-                    push(tmp);
-                    // this_chunk is now a new empty vector
-                } else {
-                    this_chunk.push(s);
-                }
-            }
-            push(this_chunk);
-        }
-
-        Ok((commands,Flags {
-            filter_desc: args.get_string("filter"),
-            group_name: args.get_string("group"),
-            timeout: args.get_integer("timeout"),
-            verbose: args.get_bool("verbose"),
-            quiet: args.get_bool("quiet"),
-            config_file: args.get_path("config"),
-            json_store: json_store,
-            moi_dir: moi_dir,
-     //       format: args.get_string("message_format"),
-        }))
-
-    }
-}
 
 const QUERY_TOPIC: &str = "MOI/query";
 const QUERY_FILE_RESULT_TOPIC: &str = "MOI/result/query";
@@ -300,6 +194,7 @@ impl MessageData {
         if self.verbose {
             println!("query {:?}",self.current_query());
         }
+        info!("query seq {}: {:?}",self.seq,self.current_query());
         let q = self.current_query().to_json();
         self.responses.clear();
         if q == JsonValue::Null {
@@ -346,7 +241,6 @@ impl MessageData {
         let seq: u8 = iter.next().unwrap().parse()?;
         let addr = iter.next().unwrap();
         let name = iter.next().unwrap();
-        //println!("DBG: pull got {} {} {}",seq,addr,name);
         *id = addr.into();
 
         (seq == self.seq)
@@ -456,7 +350,7 @@ impl MessageData {
             true
         } else
         if let Some(ref group_name) = self.maybe_group {
-            // Group filters rely on special key 'group', _plus_
+            // Group filters rely on special array-based key 'groups', _plus_
             // group responses are checked against saved group members
             let group = &self.group;
             let responses = &self.responses;
@@ -471,7 +365,7 @@ impl MessageData {
             }
             for (id,name) in group {
                 if ! responses.contains_key(id) {
-                    eprintln!("error: {} {} failed to respond", id, name);
+                    error!("error: {} {} failed to respond", id, name);
                     ok = false;
                 }
             }
@@ -679,12 +573,18 @@ fn cat(a: &str, b: &str) -> String {
 
 // our real error-returning main function.
 fn run() -> BoxResult<bool> {
-    let lapp_args = lapp::parse_args(USAGE);
-    let (commands,mut flags) = Flags::new(&lapp_args)?;
+    let (commands,mut flags) = args::Flags::new()?;
     let toml: toml::Value = read_to_string(&flags.config_file)?.parse()?;
     let config = toml.get("config").or_err("No [config] section")?;
     config.is_table().or_err("config must be a table")?;
     let command_aliases = toml.get("commands");
+
+    let path: PathBuf = if let Some(log_file) = gets(config,"log_file")? {
+        log_file.into()
+    } else {
+        flags.moi_dir.join("moi.log")
+    };
+    logging::init(Some(&path),gets_or(config,"log_level","info")?)?;
 
     let mut store = Config::new_from_file(&flags.json_store)?;
 
@@ -746,6 +646,8 @@ fn run() -> BoxResult<bool> {
         message_data.set_group(&flags.group_name,jgroup);
     }
     let filter = Condition::from_description(&flags.filter_desc);
+    info!("filter {:?}",filter);
+
     // Queries only meant for one device cause a temporary group
     // to be created.
     if let Some((id,was_addr)) = filter.unique_id() {
@@ -756,6 +658,7 @@ fn run() -> BoxResult<bool> {
     let launching = message_data.query.iter().any(|q| q.is_wait());
     if launching && message_data.maybe_group.is_none() {
         println!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
+        warn!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
     }
 
     let timeout = timeout::Timeout::new_shared(flags.timeout);
@@ -768,15 +671,19 @@ fn run() -> BoxResult<bool> {
             let mut seq = 0;
             let (id,success,resp) = MessageData::parse_response(msg.text(),&mut seq);
             if ! success {
-                eprintln!("error for {} seq {}: {}",id,seq,resp.to_string());
+                eprintln!("error for {} seq {}: {}", id,seq,resp);
+                error!("seq {} addr {} resp {}", seq,id,resp);
                 data.response(id,false,false);
                 return;
             } else {
                 if data.verbose {
-                    println!("id {} resp {}",id, resp.to_string());
+                    println!("id {} resp {}", id,resp);
                 }
+                info!("seq {} addr {} resp {}", seq,id,resp);
                 if seq != data.seq {
                     eprintln!("late arrival {}: seq {} != {}",id,seq,data.seq);
+                    // TODO arrange log config so that errors always echoed to stderr
+                    error!("late arrival {}: seq {} != {}",id,seq,data.seq);
                 } else {
                     data.handle_response(id,resp);
                 }
@@ -804,6 +711,7 @@ fn run() -> BoxResult<bool> {
             let mut id = String::new();
             if let Err(e) = data.handle_fetch(parms,msg.payload(),&mut id) {
                 eprintln!("pull error: {}",e);
+                error!("pull error: {}",e);
                 std::process::exit(1);
             }
             data.response(id,true,false);
@@ -850,6 +758,7 @@ fn run() -> BoxResult<bool> {
             }
         }
     });
+
 
     m.loop_until_disconnect(-1)?;
 

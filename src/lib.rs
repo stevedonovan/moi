@@ -2,6 +2,11 @@
 // Mostly manages a convenient JSON store
 extern crate json;
 extern crate get_if_addrs;
+extern crate log;
+extern crate time as timec;
+
+pub mod logging;
+
 use std::path::{Path,PathBuf};
 use std::io;
 use std::io::prelude::*;
@@ -306,8 +311,15 @@ impl Config {
         })
     }
 
-    pub fn gets(&self,key: &str) -> io::Result<&str> {
+    pub fn gets(&self, key: &str) -> io::Result<&str> {
         as_str(self.get(key)?)
+    }
+
+    pub fn gets_opt(&self, key: &str) -> io::Result<Option<&str>> {
+        match self.values.get(key) {
+            None => Ok(None),
+            Some(v) => Ok(Some(as_str(v)?))
+        }
     }
 
     pub fn gets_or<'a>(&'a self, key: &str, def: &'static str) -> &'a str
