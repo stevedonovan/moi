@@ -47,12 +47,13 @@ fn as_option(s: &Option<String>) -> JsonValue {
     }
 }
 
+fn s (txt: &str) -> &str { txt }
+
+#[derive(Debug)]
 pub struct KeyValue {
     pub key: String,
     pub value: String
 }
-
-fn s (txt: &str) -> &str { txt }
 
 impl KeyValue {
     fn as_jarray(&self) -> JsonValue {
@@ -72,6 +73,7 @@ impl KeyValue {
     }
 }
 
+#[derive(Debug)]
 pub enum Condition {
     Equals(KeyValue),
     NotEquals(KeyValue),
@@ -150,13 +152,22 @@ impl Condition {
     }
 }
 
-#[derive(Debug)]
 pub struct CopyFile {
     pub path: PathBuf,
     pub filename: String,
     pub bytes: Vec<u8>,
     pub dest: String,
     pub perms: Option<u32>,
+}
+
+use std::fmt;
+
+impl fmt::Debug for CopyFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CopyFile {{ path: {:?}, filename: {:?}, bytes: {}b, dest: {:?}, perms: {:?} }}",
+            self.path,self.filename,self.bytes.len(),self.dest,self.perms
+        )
+    }
 }
 
 impl CopyFile {

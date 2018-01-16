@@ -71,6 +71,7 @@ fn builtin_var(key: &str) -> Option<JsonValue> {
     }
 }
 
+// how a remote knows that a query is intended for itself
 fn match_condition(cfg: &Config, how: &str, condn: &JsonValue) -> io::Result<bool> {
     if how == "any" || how == "all" {
         let any = how == "any";
@@ -112,24 +113,8 @@ fn match_condition(cfg: &Config, how: &str, condn: &JsonValue) -> io::Result<boo
 }
 
 fn special_destination_prefix(cfg: &Config, starts: &str) -> PathBuf {
-    if starts == "self" {
-        env::current_dir().unwrap()
-    } else
-    if starts == "home" {
-        cfg.home().into()
-    } else
-    if starts == "tmp" {
-        let tmp = env::temp_dir().join("MOID");
-        if ! tmp.exists() {
-            // hm, this is a bad possibility...
-            if ! tmp.exists() {
-                fs::create_dir(&tmp).expect("could not create tmp dir");
-            }
-        }
-        tmp
-    } else
-    if starts == "bin" {
-        cfg.gets("bin").unwrap().into()
+    if cfg.get("destinations").unwrap().contains(starts) {
+       cfg.gets(starts).unwrap().into()
     } else {
         starts.into()
     }
@@ -396,6 +381,25 @@ fn run() -> BoxResult<()> {
     }
     if ! config.values.contains_key("rc") {
         config.values.insert("rc".into(),0.into());
+    }
+    if ! config.values.contains_key("self") {
+        config.values.insert("self".into(),env::current_dir()?.to_str().unwrap().into());
+    }
+    if ! config.values.contains_key("tmp") {
+        let tmp = env::temp_dir().join("MOID");
+        if ! tmp.exists() {
+            fs::create_dir(&tmp)
+                .map_err(|e| io_error(&format!("could not create tmp dir: {}",e)))?;
+        }
+        config.values.insert("tmp".into(),tmp.to_str().unwrap().into());
+    }
+    if ! config.values.contains_key("destinations") {
+        let mut arr = JsonValue::new_array();
+        arr.push("bin")?;
+        arr.push("tmp")?;
+        arr.push("bin")?;
+        arr.push("home")?;
+        config.values.insert("destinations".into(), arr );
     }
 
     logging_init(&config)?;
