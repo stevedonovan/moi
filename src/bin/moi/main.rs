@@ -311,7 +311,7 @@ impl MessageData {
                 // contents coming over as MOI/fetch/{seq}/{addr}/{name}
                 ok = None;
             },
-            Query::Copy(ref cf) => {
+            Query::Copy(ref cf,_) => {
                 // the first response we get, we post the actual file contents
                 if self.sent_file.is_none() {
                     let bytes = &cf.bytes;
@@ -379,7 +379,7 @@ impl MessageData {
 
 // implement our commands as Query enum values
 fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
-    use strutil::strings;
+    use strutil::{strings,split_at_delim};
     match cmd {
         "ls" => {
             Ok(Query::get(args.to_vec(),cmd.into()))
@@ -395,10 +395,10 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             Ok(Query::group(&args[0]))
         },
         "set" | "seta" => {
-            (args.len() > 0).or_err("set: key1=value1 [key2=value2 ...]")?;
+            (args.len() > 0).or_then_err(|| format!("{}: key1=value1 [key2=value2 ...]",cmd))?;
             let mut map = HashMap::new();
             for s in args {
-                let (k,v) = strutil::split_at_delim(s,"=")
+                let (k,v) = split_at_delim(s,"=")
                     .or_then_err(|| format!("{} is not a key-value pair",s))?;
                 KeyValue::valid_key(k)
                     .or_then_err(|| format!("{} is not a valid key name",k))?;
@@ -411,7 +411,7 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             Ok(Query::rma("groups",&args[0]))
         },
         "run" | "launch" | "spawn" => {
-            (args.len() >= 1).or_err("run: command [working-dir] [job-name]")?;
+            (args.len() >= 1).or_then_err(|| format!("{}: command [working-dir] [job-name]",cmd))?;
             let rc = RunCommand::new(&args[0],args.get(1).cloned(),args.get(2).cloned());
             Ok(
                 if cmd=="run" {Query::Run(rc)}
@@ -424,12 +424,17 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             (args.len() == 2).or_err("push: local-file-name remote-dest")?;
             let path = PathBuf::from(args[0].clone());
             (path.exists() && path.is_file()).or_err("push: file does not exist, or is a directory")?;
+            let (target,dest) = if let Some((target,dest)) = split_at_delim(&args[1],"=") {
+                (Some(target.to_string()),dest)
+            } else {
+                (None,args[1].as_str())
+            };
             let mut cf = CopyFile::new(
                 path,
                 &args[1]
             );
             cf.read_bytes()?;
-            Ok(Query::Copy(cf))
+            Ok(Query::Copy(cf,target))
         },
         "pull" => {
             (args.len() == 2).or_err("pull: remote-file-name local-dest")?;

@@ -249,7 +249,7 @@ pub enum Query {
     Run(RunCommand),
     Launch(RunCommand),
     Spawn(RunCommand),
-    Copy(CopyFile),
+    Copy(CopyFile,Option<String>),
     Fetch(FetchFile),
     Restart(i32),
     Ping(Instant),
@@ -321,7 +321,7 @@ impl Query {
             Query::Run(ref r) => object!{"run" => r.to_json() },
             Query::Launch(ref r) => object!{"launch" => r.to_json()},
             Query::Spawn(ref r) => object!{"spawn" => r.to_json()},
-            Query::Copy(ref c) => object!{"cp" => c.to_json()},
+            Query::Copy(ref c,_) => object!{"cp" => c.to_json()},
             Query::Fetch(ref f) => object!{"fetch" => f.to_json()},
             Query::Restart(code) => object!{"restart" => code},
             Query::Chain(ref vq) => {
