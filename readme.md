@@ -11,7 +11,7 @@ with a JSON result.
 
 We had been investigating Salt Stack in a similar context, and `moi` is in
 some ways a reaction to Salt: small, focussed, assuming that the remote
-devices are Linux. We can always lean on a minimal POSIX environment
+devices are Unix-like. We can always lean on a minimal POSIX environment
 in the remotes.
 
 ## No Server (except for broker) just Client
@@ -117,7 +117,6 @@ error: 10.10.10.22 merry failed to respond
 moi$ moi -q -g all ping
 error: 10.10.10.22 merry failed to respond
 ```
-
 After saying `moid merry.json&` in the other terminal, we're back to happiness.
 This group behaviour makes it straightforward to quickly detect any missing children,
 especially with `ping` used with `--quiet` - output is only produced if there is
@@ -163,7 +162,6 @@ moi$ moi run pwd self
 10.10.10.22	merry	/home/steve/rust/repos/moi/examples
 10.10.10.23	pippin	/home/steve/rust/repos/moi/examples
 ```
-
 More elaborate commands are tedious to type, because of shell quoting rules.
 So `push-run` first pushes a file and then runs a command (note that
 permissions of a pushed file are preserved, and another special destination
@@ -175,7 +173,6 @@ df -h / | awk '{getline; print $4}'
 scratch$ moi -f name=jessie push-run space tmp './space'
 192.168.0.13	jessie	18G
 ```
-
 `push-run` is a convenient shortcut - `moi` supports multi-staged commands separated
 by "::".
 
@@ -213,7 +210,6 @@ up the timeout. There is another solution:
 scratch$ alias jessie='moi -f name=jessie'
 scratch$ jessie push tree_1.7.0-3_i386.deb tmp :: launch 'dpkg -i tree_1.7.0-3_i386.deb' tmp :: wait
 ```
-
 `launch` is intended for longer-lasting tasks, and here it's used synchronously - `moi` will wait
 only as long as is needed, although a long default timeout (20s) is set for the final `wait`.
 `moi` will in fact complain if there's no group filter because otherwise it simply does not know
@@ -236,7 +232,6 @@ scratch$ moi -f 'all name="jessie" sleep-job.code=0' ls
 192.168.0.13	jessie
 
 ```
-
 `pull` retrieves files from remotes. Here the arguments are the remote
 file and the local destination file name. This obviously cannot be the
 same for _everyone_, so there are some _percent substitutions_ available.
@@ -465,11 +460,13 @@ These are the keys always available from the remote:
 
   - `name`  settable, invoke `hostname` otherwise
   - `addr`  settable, look for non-local IP4 addresses otherwise.
-     Can specify `interface` in `moid` JSON config if there are
-     multiple interfaces
+     (Can specify `interface` in `moid` JSON config if there are
+     multiple interfaces)
   - `time` time at the remote as Unix timestamp
   - `arch` processor architecture
   - `moid` version of `moid` running
+  - `rc` result of last remote command run
+  - `destinations` array of special destinations
 
 Keys may consist of alphanumeric characters, plus underscore and dash.
 Periods are not valid!
@@ -480,9 +477,8 @@ Here are the basic filters:
 
    - `KEY=VALUE` test for (string) equality
    - `KEY=VALUE#` true if first part matches up to #
-   - `KEY:VALUE`  true if value is found in the _array-valued_ key
-     `KEY`. (So "groups:all" matches all devices which belong to the "all"
-     group)
+   - `KEY:VALUE`  true if value is found in the _array-valued_ key `KEY`.
+      (So "groups:all" matches all devices which belong to the "all" group)
    - `KEY`  true if the key exists at all
    - `KEY.not.VALUE` inequality test
 
@@ -495,12 +491,57 @@ replied, and will complain bitterly about members that do not reply within
 the specified timeout.  A single-remote filter like "addr=ADDR" or "name=NAME"
 counts as a group operation - i.e. it is an error for the remote not to reply.
 
+It also implies a further condition, that the variable `rc` is zero. Any
+remote command execution sets `rc`, so `::` acts a little bit like `&&` - 
+subsequent operations can only happen if the previous command succeeded.
+
 ### Special Destinations
 
 Generally it's a good idea to let the remotes have preferences for special
 directories like their home, where `moid` lives, the temporary dir and
-the desired location for programs. These work with the file operations and
+the desired location for programs.
+
+These work with the file operations and
 the remote-command operations. So instead of pushing a file to "/tmp", you
 just say "tmp" and let the remote handle the details. Simularly, we have
 "home", "bin" and "self" (which is `moid` location).
 
+The remote does do tilde-expansion, but "home" is easier to type than
+"'~'" (in quotes because the tilde won't survive local shell expansion otherwise.)
+
+Destinations are remote variables but there is a special array-valued variable
+`destinations` which actually determines whether a key is used as a 
+destination.
+
+So it is possible to set new destinations on a remote by setting a variable
+and adding it to the `destinations` array:
+
+```
+$ moi -f name=frodo set downloads=/home/steve/Downloads :: seta destinations=downloads
+$ moi -f name=frodo ls downloads
+10.10.10.10	frodo	/home/steve/Downloads
+~/c/rust/repos/moi/examples$ moi -f name=frodo run ls downloads
+10.10.10.10	frodo:
+0d0b8dbb2c6045659713318c472b72db.pdf
+1194212734.pdf
+....
+```
+
+There is an extended syntax for these destinations, modelled on that of `scp/ssh`.
+The remote destination can be `{target}:{dest}`:
+
+```
+$ moi push test.txt frodo:home
+```
+
+This is entirely equivalent to:
+
+```
+$ moi -f name=frodo push test.txt home
+```
+The 'target' here can be one of three things:
+  - an IPv4 address
+  - a known name (requires the "all" group to be defined)
+  - or a group
+
+`moi` insists that there shall be only one such target specification on the command line.

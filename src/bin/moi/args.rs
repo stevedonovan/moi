@@ -16,6 +16,7 @@ Execute commands on devices
             KEY:VALUE  test whether value is in the array KEY
             KEY.not.VALUE test for values not equal to VALUE
   -g, --group (default none) for a predefined group
+  -n, --name (default none) for either address, name or group
   -T, --timeout (default 300) timeout for accessing all devices
   -v, --verbose tell us all about what's going on...
   -q, --quiet output only on error
@@ -46,6 +47,7 @@ pub struct CommandArgs {
 pub struct Flags {
     pub filter_desc: String,
     pub group_name: String,
+    pub name_or_group: String,
     pub config_file: PathBuf,
     pub moi_dir: PathBuf,
     pub json_store: PathBuf,
@@ -100,6 +102,7 @@ impl Flags {
         Ok((commands,Flags {
             filter_desc: args.get_string("filter"),
             group_name: args.get_string("group"),
+            name_or_group: args.get_string("name"),
             timeout: args.get_integer("timeout"),
             verbose: args.get_bool("verbose"),
             quiet: args.get_bool("quiet"),

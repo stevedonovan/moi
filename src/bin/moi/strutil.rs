@@ -1,6 +1,11 @@
 // miscelaneous string handling things
 use moi::*;
 
+pub fn is_ipv4(addr: &str) -> bool {
+    // TEMPORARY
+    addr.chars().filter(|&c| c == '.').count() == 4
+}
+
 pub fn strings<T: ToString>(slice: &[T]) -> Vec<String> {
     slice.iter().map(|s| s.to_string()).collect()
 }

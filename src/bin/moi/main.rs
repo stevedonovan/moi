@@ -311,7 +311,7 @@ impl MessageData {
                 // contents coming over as MOI/fetch/{seq}/{addr}/{name}
                 ok = None;
             },
-            Query::Copy(ref cf,_) => {
+            Query::Copy(ref cf) => {
                 // the first response we get, we post the actual file contents
                 if self.sent_file.is_none() {
                     let bytes = &cf.bytes;
@@ -377,8 +377,17 @@ impl MessageData {
 
 }
 
+fn remote_target_destination<'a>(spec: &'a str, flags: &mut Flags) -> &'a str {
+    if let Some((target,dest)) = strutil::split_at_delim(spec,":") {
+        flags.name_or_group = target.into();
+        dest
+    } else {
+        spec
+    }
+}
+
 // implement our commands as Query enum values
-fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
+fn construct_query(cmd: &str, args: &[String], flags: &mut Flags) -> BoxResult<Query> {
     use strutil::{strings,split_at_delim};
     match cmd {
         "ls" => {
@@ -412,7 +421,12 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
         },
         "run" | "launch" | "spawn" => {
             (args.len() >= 1).or_then_err(|| format!("{}: command [working-dir] [job-name]",cmd))?;
-            let rc = RunCommand::new(&args[0],args.get(1).cloned(),args.get(2).cloned());
+            let working_dir = if let Some(working_dir) = args.get(1) {
+                Some(remote_target_destination(working_dir,flags).into())
+            } else {
+                None
+            };
+            let rc = RunCommand::new(&args[0],working_dir,args.get(2).cloned());
             Ok(
                 if cmd=="run" {Query::Run(rc)}
                 else if cmd=="launch" {Query::Launch(rc)}
@@ -422,24 +436,21 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
         "wait" => Ok(Query::Wait),
         "push" => {
             (args.len() == 2).or_err("push: local-file-name remote-dest")?;
-            let path = PathBuf::from(args[0].clone());
+            let path = PathBuf::from(args[0].clone());            
             (path.exists() && path.is_file()).or_err("push: file does not exist, or is a directory")?;
-            let (target,dest) = if let Some((target,dest)) = split_at_delim(&args[1],"=") {
-                (Some(target.to_string()),dest)
-            } else {
-                (None,args[1].as_str())
-            };
+            let dest = remote_target_destination(&args[1],flags);
             let mut cf = CopyFile::new(
                 path,
-                &args[1]
+                dest,
             );
             cf.read_bytes()?;
-            Ok(Query::Copy(cf,target))
+            Ok(Query::Copy(cf))
         },
         "pull" => {
             (args.len() == 2).or_err("pull: remote-file-name local-dest")?;
-            let remote_path = PathBuf::from(args[0].clone());
-            let local_path = PathBuf::from(args[1].clone());
+            let dest = remote_target_destination(&args[0],flags);
+            let remote_path = PathBuf::from(dest);
+            let local_path = PathBuf::from(&args[1]);
             (! local_path.is_dir())
                 .or_then_err(|| format!("pull: destination {} must not be a directory!",local_path.display()))?;
             {
@@ -461,8 +472,8 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             let dest = &args[1];
             let cmd = &args[2];
             Ok(Query::Actions(vec![
-                construct_query("push",&strings(&[file,dest]))?,
-                construct_query("run",&strings(&[cmd,dest]))? // use dest as pwd
+                construct_query("push",&strings(&[file,dest]),flags)?,
+                construct_query("run",&strings(&[cmd,dest]),flags)? // use dest as pwd
             ]))
         },
         "run-pull" => {
@@ -471,8 +482,8 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
             let dir = &args[1];
             let file = &args[2];
             Ok(Query::Actions(vec![
-                construct_query("run",&strings(&[cmd,dir]))?,
-                construct_query("pull",&strings(&[file,dir]))?
+                construct_query("run",&strings(&[cmd,dir]),flags)?,
+                construct_query("pull",&strings(&[file,dir]),flags)?
             ]))
         },
         "restart" => {
@@ -484,7 +495,7 @@ fn construct_query(cmd: &str, args: &[String]) -> BoxResult<Query> {
     }
 }
 
-fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
+fn query_alias(def: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
     // MUST have at least "command" and "args"
     let alias_command = def.get("command").or_err("alias: command must be defined")?
         .as_str().or_err("alias: command must be string")?;
@@ -498,7 +509,7 @@ fn query_alias(def: &toml::Value, flags: &Flags, cmd: &CommandArgs, help: &str) 
     if flags.verbose {
         println!("alias command {} args {:?}",alias_command,alias_args);
     }
-    Ok(construct_query(alias_command,&alias_args)?)
+    Ok(construct_query(alias_command,&alias_args,flags)?)
 }
 
 fn query_alias_collect(t: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, res: &mut Vec<Query>) -> BoxResult<()> {
@@ -552,7 +563,7 @@ fn construct_query_alias(aliases: Option<&toml::Value>, commands: &[CommandArgs]
         }
         // regular plain jane arguments - will complain if not recognized
         if ! was_alias {
-            res.push(construct_query(&cmd.command, &cmd.arguments)?)
+            res.push(construct_query(&cmd.command, &cmd.arguments, flags)?)
         }
     }
 
@@ -639,6 +650,19 @@ fn run() -> BoxResult<bool> {
         None => JsonValue::Null
     };
     message_data.set_queries(query);
+    
+    // this can be an address, name or group!
+    if flags.name_or_group != "none" {
+        if strutil::is_ipv4(&flags.name_or_group) {
+            flags.filter_desc = format!("addr={}",flags.name_or_group);
+        } else {  // a name?
+            if let Ok(addr) = message_data.lookup_addr(&flags.name_or_group) {
+                flags.filter_desc = format!("addr={}",addr);
+            } else {
+                flags.group_name = flags.name_or_group.clone();
+            }
+        }
+    }
 
     // --group NAME works like --filter groups:NAME
     // except the results are checked against saved group information
