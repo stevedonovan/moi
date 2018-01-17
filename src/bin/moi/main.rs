@@ -14,18 +14,19 @@ mod query;
 mod toml_utils;
 mod timeout;
 mod flags;
+mod commands;
 // mod output;
 
 use moi::*;
 use query::*;
 use toml_utils::*;
-use flags::{Flags,CommandArgs};
+//use flags::{Flags,CommandArgs};
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
 
-use std::path::{Path,PathBuf};
-use std::time::{Instant,Duration};
+use std::path::{PathBuf};
+use std::time::{Duration};
 use std::collections::HashMap;
 use std::{fs,io,thread};
 use std::io::prelude::*;
@@ -376,215 +377,11 @@ impl MessageData {
 
 }
 
-fn remote_target_destination<'a>(spec: &'a str, flags: &mut Flags) -> BoxResult<&'a str> {
-    (flags.name_or_group == "none").or_err("can only specify target once")?;
-    Ok(if let Some((target,dest)) = strutil::split_at_delim(spec,":") {
-        flags.name_or_group = target.into();
-        dest
-    } else {
-        spec
-    })
-}
-
-// implement our commands as Query enum values
-fn construct_query(cmd: &str, args: &[String], flags: &mut Flags) -> BoxResult<Query> {
-    use strutil::{strings,split_at_delim};
-    match cmd {
-        "ls" => {
-            Ok(Query::get(args.to_vec(),cmd.into()))
-        },
-        "time" => {
-            Ok(Query::Get(vec!["addr".into(),"name".into(),"time".into()],cmd.into()))
-        },
-        "ping" => {
-            Ok(Query::Ping(Instant::now()))
-        },
-        "group" => {
-            (args.len() == 1).or_err("group: group-name")?;
-            Ok(Query::group(&args[0]))
-        },
-        "set" | "seta" => {
-            (args.len() > 0).or_then_err(|| format!("{}: key1=value1 [key2=value2 ...]",cmd))?;
-            let mut map = HashMap::new();
-            for s in args {
-                let (k,v) = split_at_delim(s,"=")
-                    .or_then_err(|| format!("{} is not a key-value pair",s))?;
-                KeyValue::valid_key(k)
-                    .or_then_err(|| format!("{} is not a valid key name",k))?;
-                map.insert(k.to_string(),v.to_string());
-            }
-            Ok(if cmd=="set" {Query::Set(map)} else {Query::Seta(map)})
-        },
-        "remove-group" => {
-            (args.len() == 1).or_err("remove-group: group-name")?;
-            Ok(Query::rma("groups",&args[0]))
-        },
-        "run" | "launch" | "spawn" => {
-            (args.len() >= 1).or_then_err(|| format!("{}: command [working-dir] [job-name]",cmd))?;
-            let working_dir = if let Some(working_dir) = args.get(1) {
-                Some(remote_target_destination(working_dir,flags)?.into())
-            } else {
-                None
-            };
-            let rc = RunCommand::new(&args[0],working_dir,args.get(2).cloned());
-            Ok(
-                if cmd=="run" {Query::Run(rc)}
-                else if cmd=="launch" {Query::Launch(rc)}
-                else {Query::Spawn(rc)}
-            )
-        },
-        "wait" => Ok(Query::Wait),
-        "push" => {
-            (args.len() == 2).or_err("push: local-file-name remote-dest")?;
-            let path = PathBuf::from(args[0].clone());
-            (path.exists() && path.is_file()).or_err("push: file does not exist, or is a directory")?;
-            let dest = remote_target_destination(&args[1],flags)?;
-            let mut cf = CopyFile::new(
-                path,
-                dest,
-            )?;
-            cf.read_bytes()?;
-            Ok(Query::Copy(cf))
-        },
-        "pull" => {
-            (args.len() == 2).or_err("pull: remote-file-name local-dest")?;
-            let dest = remote_target_destination(&args[0],flags)?;
-            let remote_path = PathBuf::from(dest);
-            let local_path = PathBuf::from(&args[1]);
-            (! local_path.is_dir())
-                .or_then_err(|| format!("pull: destination {} must not be a directory!",local_path.display()))?;
-            {
-                let parent = local_path.parent()
-                    .or_then_err(|| format!("pull: destination {} has no parent",local_path.display()))?;
-                if parent != Path::new("") {
-                    writeable_directory(&parent)?;
-                }
-            }
-            Ok(Query::Fetch(FetchFile {
-                source: remote_path,
-                local_dest: local_path,
-            }))
-        },
-        "push-run" => {
-            // example of a two-step command
-            (args.len() == 3).or_err("push-run: local-file destination command")?;
-            let file = &args[0];
-            let dest = &args[1];
-            let cmd = &args[2];
-            Ok(Query::Actions(vec![
-                construct_query("push",&strings(&[file,dest]),flags)?,
-                construct_query("run",&strings(&[cmd,dest]),flags)? // use dest as pwd
-            ]))
-        },
-        "run-pull" => {
-            (args.len() == 3).or_err("run-pull: command dir remote-file")?;
-            let cmd = &args[0];
-            let dir = &args[1];
-            let file = &args[2];
-            Ok(Query::Actions(vec![
-                construct_query("run",&strings(&[cmd,dir]),flags)?,
-                construct_query("pull",&strings(&[file,dir]),flags)?
-            ]))
-        },
-        "restart" => {
-            Ok(Query::Restart(0))
-        },
-        _ => {
-            err_io(&format!("not a command: {}",cmd))
-        }
-    }
-}
-
-fn query_alias(def: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, help: &str) -> BoxResult<Query> {
-    // MUST have at least "command" and "args"
-    let alias_command = def.get("command").or_err("alias: command must be defined")?
-        .as_str().or_err("alias: command must be string")?;
-
-    let alias_args = toml_strings(def.get("args").or_err("alias: args must be defined")?
-        .as_array().or_err("alias: args must be array")?
-    )?;
-    let alias_args = strutil::replace_dollar_args_array(&alias_args,&cmd.arguments)
-        .map_err(|e| io_error(&format!("{} {} {}",cmd.command, help, e)))?;
-
-    if flags.verbose {
-        println!("alias command {} args {:?}",alias_command,alias_args);
-    }
-    Ok(construct_query(alias_command,&alias_args,flags)?)
-}
-
-fn query_alias_collect(t: &toml::Value, flags: &mut Flags, cmd: &CommandArgs, res: &mut Vec<Query>) -> BoxResult<()> {
-    // either the filter or the group can be overriden, but currently only in the first command
-    // of a sequence
-    if let Some(filter) = gets(t,"filter")? {
-        flags.filter_desc = filter.into();
-    } else
-    if let Some(group) = gets(t,"group")? {
-        flags.group_name = group.into();
-    }
-    if let Some(_) = t.get("quiet") {
-        flags.quiet = true;
-    }
-
-    // it's a cool thing to help people.
-    let help = gets_or(t,"help","<no help>")?;
-    // there may be multiple stages, so sections [commands.NAME.1], [commands.NAME.2]... etc in config
-    let stages = geti_or(t,"stages",0)?;
-    if stages == 0 {
-        res.push(query_alias(t,flags,cmd,help)?);
-    } else {
-        for i in 1..stages+1 {
-            let idx = i.to_string();
-            let sub = t.get(&idx).or_then_err(|| format!("stage {} not found",idx))?;
-            res.push(query_alias(sub,flags,cmd,help)?);
-        }
-    }
-    Ok(())
-}
-
-// Program arguments passed as mutable reference, because
-// command aliases MAY modify the filter or group value
-fn construct_query_alias(aliases: Option<&toml::Value>, commands: &[CommandArgs], flags: &mut Flags) -> BoxResult<Query> {
-    let mut res = Vec::new();
-    for cmd in commands.iter() {
-        let mut was_alias = false;
-        // there is a section [commands.NAME] in the config TOML
-        if let Some(ref lookup) = aliases {
-            if let Some(t) = lookup.get(&cmd.command) { // we have an alias!
-                query_alias_collect(t,flags,cmd,&mut res)?;
-                was_alias = true;
-            }
-        }
-        // OK, maybe the command NAME is NAME.toml or ~/.moi/NAME.toml
-        if ! was_alias {
-            if let Some(toml) = maybe_toml_config(&cmd.command,&flags.moi_dir)? {
-                query_alias_collect(&toml,flags,cmd,&mut res)?;
-                was_alias = true;
-            }
-        }
-        // regular plain jane arguments - will complain if not recognized
-        if ! was_alias {
-            res.push(construct_query(&cmd.command, &cmd.arguments, flags)?)
-        }
-    }
-
-    // we can pack multiple queries into Actions,
-    // but pass through single queries as is
-    Ok(if res.len() == 1 {
-        res.remove(0)
-    } else {
-        Query::Actions(res)
-    })
-}
-
 fn lookup_group<'a>(store: &'a Config, group_name: &str) -> io::Result<&'a JsonValue> {
     let groups = store.values.get("groups").or_err("no groups defined!")?;
     let jgroup = &groups[group_name];
     (jgroup.is_object()).or_err("no such group")?;
     Ok(jgroup)
-}
-
-fn cat(a: &str, b: &str) -> String {
-    a.to_string() + b
 }
 
 // our real error-returning main function.
@@ -604,21 +401,7 @@ fn run() -> BoxResult<bool> {
 
     let mut store = Config::new_from_file(&flags.json_store)?;
 
-    if commands[0].command == "groups" {
-        if let Some(groups) = store.values.get("groups") {
-            for (name,members) in groups.entries() {
-                if flags.verbose {
-                    println!("{}:",name);
-                    for (addr,name) in members.entries() {
-                        println!("\t{}\t{}",addr,name);
-                    }
-                } else {
-                    println!("{} {} members",name,members.len());
-                }
-            }
-        } else {
-            println!("no groups yet!");
-        }
+    if commands::handle_local_command(&commands,&flags,&store) {
         return Ok(true);
     }
 
@@ -633,13 +416,13 @@ fn run() -> BoxResult<bool> {
     let query_resp = m.subscribe(QUERY_FILE_RESULT_TOPIC,1)?;
     let file_resp = m.subscribe(FILE_RESULT_TOPIC,1)?;
     let pvt_timeout = m.subscribe(TIMEOUT_TOPIC,1)?;
-    m.subscribe(&cat(PROCESS_FETCH_TOPIC,"#"),1)?;
+    m.subscribe(&(PROCESS_FETCH_TOPIC.to_string() + "#"),1)?;
     let process_resp = m.subscribe(PROCESS_RESULT_TOPIC,1)?;
 
     // parse the command and create a Query
     // This looks up any command aliases and may modify
     // flags.group or flags.filter
-    let query = construct_query_alias(command_aliases, &commands, &mut flags)?;
+    let query = flags.construct_query_alias(command_aliases, &commands)?;
 
     // message data is managed by mosquitto on_message handler
     let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet);
@@ -651,7 +434,7 @@ fn run() -> BoxResult<bool> {
     };
     message_data.set_queries(query);
 
-    // this can be an address, name or group!
+    // --name: this can be an address, name or group!
     if flags.name_or_group != "none" {
         if strutil::is_ipv4(&flags.name_or_group) {
             flags.filter_desc = format!("addr={}",flags.name_or_group);

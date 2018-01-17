@@ -245,6 +245,9 @@ bilbo-cargo.toml  frodo-cargo.toml  merry-cargo.toml pippin-cargo.toml
 `%n` is the value of `name`, `%a` is the value of `addr`, and `%t` is a
 Unix time stamp.
 
+If the destination is given as a directory, then a default pattern is
+used: "%n-%a-{remote-filename}"
+
 ## Remotes are Key-Value Stores
 
 An important command is `set` which sets a remote named value. (There is
@@ -492,7 +495,7 @@ the specified timeout.  A single-remote filter like "addr=ADDR" or "name=NAME"
 counts as a group operation - i.e. it is an error for the remote not to reply.
 
 It also implies a further condition, that the variable `rc` is zero. Any
-remote command execution sets `rc`, so `::` acts a little bit like `&&` - 
+remote command execution sets `rc`, so `::` acts a little bit like `&&` -
 subsequent operations can only happen if the previous command succeeded.
 
 ### Special Destinations
@@ -510,7 +513,7 @@ The remote does do tilde-expansion, but "home" is easier to type than
 "'~'" (in quotes because the tilde won't survive local shell expansion otherwise.)
 
 Destinations are remote variables but there is a special array-valued variable
-`destinations` which actually determines whether a key is used as a 
+`destinations` which actually determines whether a key is used as a
 destination.
 
 So it is possible to set new destinations on a remote by setting a variable
