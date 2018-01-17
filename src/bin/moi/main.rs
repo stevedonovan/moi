@@ -3,23 +3,23 @@
 extern crate mosquitto_client;
 extern crate lapp;
 extern crate toml;
+extern crate md5;
 #[macro_use] extern crate log;
 // our own common crate (shared with daemon)
 #[macro_use]
 extern crate moi;
 
-use moi::*;
-
 mod strutil;
-mod commands;
+mod query;
 mod toml_utils;
 mod timeout;
-mod args;
+mod flags;
 // mod output;
 
-use commands::*;
+use moi::*;
+use query::*;
 use toml_utils::*;
-use args::{Flags,CommandArgs};
+use flags::{Flags,CommandArgs};
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
@@ -29,7 +29,6 @@ use std::time::{Instant,Duration};
 use std::collections::HashMap;
 use std::{fs,io,thread};
 use std::io::prelude::*;
-//use std::fs::File;
 use std::error::Error;
 
 const LAUNCH_TIMEOUT:i32 = 20000;
@@ -377,13 +376,14 @@ impl MessageData {
 
 }
 
-fn remote_target_destination<'a>(spec: &'a str, flags: &mut Flags) -> &'a str {
-    if let Some((target,dest)) = strutil::split_at_delim(spec,":") {
+fn remote_target_destination<'a>(spec: &'a str, flags: &mut Flags) -> BoxResult<&'a str> {
+    (flags.name_or_group == "none").or_err("can only specify target once")?;
+    Ok(if let Some((target,dest)) = strutil::split_at_delim(spec,":") {
         flags.name_or_group = target.into();
         dest
     } else {
         spec
-    }
+    })
 }
 
 // implement our commands as Query enum values
@@ -422,7 +422,7 @@ fn construct_query(cmd: &str, args: &[String], flags: &mut Flags) -> BoxResult<Q
         "run" | "launch" | "spawn" => {
             (args.len() >= 1).or_then_err(|| format!("{}: command [working-dir] [job-name]",cmd))?;
             let working_dir = if let Some(working_dir) = args.get(1) {
-                Some(remote_target_destination(working_dir,flags).into())
+                Some(remote_target_destination(working_dir,flags)?.into())
             } else {
                 None
             };
@@ -436,19 +436,19 @@ fn construct_query(cmd: &str, args: &[String], flags: &mut Flags) -> BoxResult<Q
         "wait" => Ok(Query::Wait),
         "push" => {
             (args.len() == 2).or_err("push: local-file-name remote-dest")?;
-            let path = PathBuf::from(args[0].clone());            
+            let path = PathBuf::from(args[0].clone());
             (path.exists() && path.is_file()).or_err("push: file does not exist, or is a directory")?;
-            let dest = remote_target_destination(&args[1],flags);
+            let dest = remote_target_destination(&args[1],flags)?;
             let mut cf = CopyFile::new(
                 path,
                 dest,
-            );
+            )?;
             cf.read_bytes()?;
             Ok(Query::Copy(cf))
         },
         "pull" => {
             (args.len() == 2).or_err("pull: remote-file-name local-dest")?;
-            let dest = remote_target_destination(&args[0],flags);
+            let dest = remote_target_destination(&args[0],flags)?;
             let remote_path = PathBuf::from(dest);
             let local_path = PathBuf::from(&args[1]);
             (! local_path.is_dir())
@@ -589,7 +589,7 @@ fn cat(a: &str, b: &str) -> String {
 
 // our real error-returning main function.
 fn run() -> BoxResult<bool> {
-    let (commands,mut flags) = args::Flags::new()?;
+    let (commands,mut flags) = flags::Flags::new()?;
     let toml: toml::Value = read_to_string(&flags.config_file)?.parse()?;
     let config = toml.get("config").or_err("No [config] section")?;
     config.is_table().or_err("config must be a table")?;
@@ -650,7 +650,7 @@ fn run() -> BoxResult<bool> {
         None => JsonValue::Null
     };
     message_data.set_queries(query);
-    
+
     // this can be an address, name or group!
     if flags.name_or_group != "none" {
         if strutil::is_ipv4(&flags.name_or_group) {

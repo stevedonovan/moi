@@ -57,6 +57,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "md5"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "moi"
 version = "0.1.1"
 dependencies = [
@@ -64,6 +69,7 @@ dependencies = [
  "json 0.11.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "lapp 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "md5 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "mosquitto-client 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.39 (registry+https://github.com/rust-lang/crates.io-index)",
  "toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -136,6 +142,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum lapp 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "44758669f6f88b6dddac3f833f234d5128530108b5738932a166eb69660faea8"
 "checksum libc 0.2.35 (registry+https://github.com/rust-lang/crates.io-index)" = "96264e9b293e95d25bfcbbf8a88ffd1aedc85b754eba8b7d78012f638ba220eb"
 "checksum log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "89f010e843f2b1a31dbd316b3b8d443758bc634bed37aabade59c686d644e0a2"
+"checksum md5 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "b6d9aab58e540f50b59d5cfa7f0da4c3d437476890e1e0b6206e230dce55a23c"
 "checksum mosquitto-client 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "daf1819ff94ecec7d635b34d1a3db90e6146f4664001690120826b7c4dc0a68c"
 "checksum redox_syscall 0.1.37 (registry+https://github.com/rust-lang/crates.io-index)" = "0d92eecebad22b767915e4d529f89f28ee96dbbf5a4810d2b844373f136417fd"
 "checksum serde 1.0.27 (registry+https://github.com/rust-lang/crates.io-index)" = "db99f3919e20faa51bb2996057f5031d8685019b5a06139b1ce761da671b8526"

@@ -3,6 +3,7 @@
 #[macro_use] extern crate json;
 #[macro_use] extern crate moi;
 extern crate mosquitto_client;
+extern crate md5;
 
 const VERSION: &str = "0.1.2";
 
@@ -266,6 +267,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         let dest: PathBuf =  massage_destination_path(&lock!(mdata.cfg),dest);
 
         let maybe_perms = &args["perms"];
+        let maybe_hash = &args["hash"];
         let perms = if ! maybe_perms.is_null() {
             Some(
                 maybe_perms.as_u32()
@@ -274,11 +276,17 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         } else {
             None
         };
+        let hash = if maybe_hash.is_string() {
+            Some(maybe_hash.as_str().unwrap().into())
+        } else {
+            None
+        };
         writeable_directory(&dest)?;
         lock!(mdata.cfg).pending_file = Some(FilePending {
             filename: filename.into(),
             dest: dest.join(filename),
-            perms: perms
+            perms: perms,
+            hash: hash,
         });
         //println!("pending file set {:?}",cfg.pending_file);
         Ok(JsonValue::from(true))
@@ -329,7 +337,6 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
 
 fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     let res = if let Some(ref file) = lock!(mdata.cfg).pending_file {
-        //println!("copying");
         let payload = msg.payload();
         let mut oo = fs::OpenOptions::new();
         oo.create(true).write(true);
@@ -338,6 +345,11 @@ fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
         }
         let mut outf = oo.open(&file.dest)?;
         outf.write_all(payload)?;
+        if let Some(ref hash) = file.hash {
+            let digest = md5::compute(&payload);
+            let sd = format!("{:x}",digest);
+            (sd == hash.as_str()).or_then_err(|| format!("received hash was {} not {}",sd,hash))?;
+        }
         true
     } else {
         false

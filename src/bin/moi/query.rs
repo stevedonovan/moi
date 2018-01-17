@@ -1,10 +1,13 @@
 use json::JsonValue;
+use md5;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::os::unix::fs::PermissionsExt;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
+
+use moi::*;
 
 use strutil::split_at_delim;
 
@@ -158,6 +161,7 @@ pub struct CopyFile {
     pub bytes: Vec<u8>,
     pub dest: String,
     pub perms: Option<u32>,
+    pub hash: Option<String>,
 }
 
 use std::fmt;
@@ -171,22 +175,25 @@ impl fmt::Debug for CopyFile {
 }
 
 impl CopyFile {
-    pub fn new(file: PathBuf, dest: &str) -> CopyFile {
+    pub fn new(file: PathBuf, dest: &str) -> io::Result<CopyFile> {
         let filename = file.file_name().unwrap().to_str().unwrap().to_string();
-        let perms = file.metadata().unwrap().permissions().mode();
-        CopyFile {
+        let perms = file.metadata()?.permissions().mode();
+        Ok(CopyFile {
             filename: filename,
             path: file,
             bytes: Vec::new(),
             dest: dest.into(),
-            perms: Some(perms)
-        }
+            perms: Some(perms),
+            hash: None,
+        })
     }
 
     pub fn read_bytes(&mut self) -> io::Result<()> {
         let mut f = fs::File::open(&self.path)?;
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes)?;
+        let digest = md5::compute(&bytes);
+        self.hash = Some(format!("{:x}",digest));
         self.bytes = bytes;
         Ok(())
     }
@@ -195,7 +202,8 @@ impl CopyFile {
         object! {
             "filename" => s(&self.filename),
             "dest" => s(&self.dest),
-            "perms" => self.perms
+            "perms" => self.perms,
+            "hash" => as_option(&self.hash),
         }
     }
 }

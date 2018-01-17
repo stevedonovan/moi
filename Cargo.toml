@@ -10,6 +10,7 @@ lapp = "0.3.1"
 toml = "0.4.5"
 get_if_addrs = "0.4.1"
 time = "0.1"
+md5 = "0.3"
 
 [dependencies.log]
 version = "0.4"

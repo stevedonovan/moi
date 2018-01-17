@@ -199,6 +199,7 @@ pub struct FilePending {
     pub filename: String,
     pub dest: PathBuf,
     pub perms: Option<u32>,
+    pub hash: Option<String>,
 }
 
 pub struct Config {
