@@ -8,5 +8,5 @@ args = ["A"]
 
 [2]
 command = "ls"
-args = ["%1"]
+args = ["$1"]
 
