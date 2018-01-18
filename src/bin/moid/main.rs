@@ -407,11 +407,7 @@ fn run() -> BoxResult<()> {
         config.values.insert("tmp".into(),tmp.to_str().unwrap().into());
     }
     if ! config.values.contains_key("destinations") {
-        let mut arr = JsonValue::new_array();
-        arr.push("bin")?;
-        arr.push("tmp")?;
-        arr.push("bin")?;
-        arr.push("home")?;
+        let arr = array!["bin","tmp","home","self"];
         config.values.insert("destinations".into(), arr );
     }
 
