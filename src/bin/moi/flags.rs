@@ -126,7 +126,7 @@ impl Flags {
 
     fn remote_target_destination<'a>(&mut self, spec: &'a str) -> BoxResult<&'a str> {
         Ok(if let Some((target,dest)) = strutil::split_at_delim(spec,":") {
-            (self.name_or_group == "none").or_err("can only specify target once")?;
+            (self.name_or_group == "none" || self.name_or_group == target).or_err("can only specify target once")?;
             self.name_or_group = target.into();
             dest
         } else {
