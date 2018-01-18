@@ -114,7 +114,7 @@ pub fn spawn_shell_command(cmd: &str, pwd: Option<&Path>) -> process::Child {
     c
 }
 
-pub fn ip4_address(interface: &str) -> Option<String> {
+pub fn ip4_address(interface: &str, noisy: bool) -> Option<String> {
     use get_if_addrs::*;
     let addrs = match get_if_addrs() {
         Ok(addrs) => addrs,
@@ -126,10 +126,13 @@ pub fn ip4_address(interface: &str) -> Option<String> {
     for iface in addrs {
         if let IfAddr::V4(ref iface4) = iface.addr {
             let ip = iface4.ip.to_string();
+            if noisy {
+                println!("interface {} matching {}",ip,interface);
+            }
             if iface.name == interface {
                 return Some(ip);
             } else
-            if ! iface.is_loopback() {
+            if interface == "" && ! iface.is_loopback() {
                 return Some(ip);
             }
         }
@@ -227,7 +230,7 @@ impl Config {
                 Some(val) => val.to_string(),
                 None => "".into()
             };
-            let ip4 = ip4_address(&interface).unwrap_or("127.0.0.1".into());
+            let ip4 = ip4_address(&interface,false).unwrap_or("127.0.0.1".into());
             //println!("interface {} IP4 {}",interface,ip4);
             map.insert("addr".into(),ip4.into());
         }

@@ -382,6 +382,7 @@ fn logging_init(cfg: &Config) -> BoxResult<()> {
 fn run() -> BoxResult<()> {
     let file = std::env::args().nth(1).or_err("provide a config file")?;
     if file == "--version" {
+        ip4_address("",true);
         println!("MOI daemon version {}",VERSION);
         return Ok(());
     }
