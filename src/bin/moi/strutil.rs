@@ -2,8 +2,8 @@
 use moi::*;
 
 pub fn is_ipv4(addr: &str) -> bool {
-    // TEMPORARY
-    addr.chars().filter(|&c| c == '.').count() == 4
+    let res: Result<Vec<_>,_> = addr.split('.').map(|p| p.parse::<u32>()).collect();
+    res.is_ok()
 }
 
 pub fn strings<T: ToString>(slice: &[T]) -> Vec<String> {
