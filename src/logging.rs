@@ -22,7 +22,10 @@ struct MoiLogger {
 impl MoiLogger {
     fn new (path: Option<&Path>) -> BoxResult<MoiLogger> {
         let out = if let Some(path) = path {
-            Some(Mutex::new(fs::File::create(path)?))
+            if ! path.exists() {
+                fs::File::create(path)?;
+            }
+            Some(Mutex::new(fs::OpenOptions::new().append(true).open(path)?))
         } else {
             None
         };
