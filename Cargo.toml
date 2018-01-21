@@ -5,8 +5,7 @@ authors = ["steve donovan <steve.j.donovan@gmail.com>"]
 
 [dependencies]
 json = "0.11.12"
-# mosquitto-client = "0.1.2"
-mosquitto-client = {path = "/home/steve/rust/mosquitto-client"}
+mosquitto-client = "0.1.3"
 lapp = "0.3.1"
 toml = "0.4.5"
 get_if_addrs = "0.4.1"
