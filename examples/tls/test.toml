@@ -1,0 +1,15 @@
+[config]
+store = "test.json"
+mqtt_addr = "localhost"
+mqtt_port = 8883
+name = "TLS1"
+addr = "10.20.30.10"
+home = "."
+
+[tls]
+path = "."
+cafile = "server.crt"
+certfile = "ca.crt"
+keyfile = "ca.key"
+passphrase = "frodo"
+

@@ -1,0 +1,20 @@
+{
+  "groups": [
+    "all"
+  ],
+  "addr": "10.20.30.10",
+  "rc": 0,
+  "tmp": "/tmp/MOID",
+  "bin": "/usr/local/bin",
+  "name": "TLS1",
+  "moid": "0.1.2",
+  "home": ".",
+  "destinations": [
+    "bin",
+    "tmp",
+    "home",
+    "self"
+  ],
+  "self": "/home/steve/rust/repos/moi/examples/tls",
+  "arch": "x86_64"
+}

@@ -1,0 +1,11 @@
+[config]
+mqtt_addr = "localhost"
+mqtt_port = 8883
+
+[tls]
+path = "."
+cafile = "server.crt"
+certfile = "ca.crt"
+keyfile = "ca.key"
+passphrase = "frodo"
+

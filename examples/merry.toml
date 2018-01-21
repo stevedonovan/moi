@@ -1,0 +1,4 @@
+[config]
+addr = "10.10.10.22"
+home = "stations/merry"
+name = "merry"
