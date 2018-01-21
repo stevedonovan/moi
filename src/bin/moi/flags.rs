@@ -133,6 +133,19 @@ impl Flags {
 
     ///// creating queries out of command-line args //////
 
+    fn keyvalue_args(args: &[String]) -> BoxResult<HashMap<String,String>> {
+        use strutil::split_at_delim;
+        let mut map = HashMap::new();
+        for s in args {
+            let (k,v) = split_at_delim(s,"=")
+                .or_then_err(|| format!("{} is not a key-value pair",s))?;
+            KeyValue::valid_key(k)
+                .or_then_err(|| format!("{} is not a valid key name",k))?;
+            map.insert(k.to_string(),v.to_string());
+        }
+        Ok(map)
+    }
+
     fn remote_target_destination<'a>(&mut self, spec: &'a str) -> BoxResult<&'a str> {
         Ok(if let Some((target,dest)) = strutil::split_at_delim(spec,":") {
             (self.name_or_group == "none" || self.name_or_group == target).or_err("can only specify target once")?;
@@ -145,7 +158,7 @@ impl Flags {
 
     // implement our commands as Query enum values
     fn construct_query(&mut self, cmd: &str, args: &[String]) -> BoxResult<Query> {
-        use strutil::{strings,split_at_delim};
+        use strutil::strings;
         match cmd {
             "ls" => {
                 Ok(Query::get(args.to_vec(),cmd.into()))
@@ -162,15 +175,14 @@ impl Flags {
             },
             "set" | "seta" => {
                 (args.len() > 0).or_then_err(|| format!("{}: key1=value1 [key2=value2 ...]",cmd))?;
-                let mut map = HashMap::new();
-                for s in args {
-                    let (k,v) = split_at_delim(s,"=")
-                        .or_then_err(|| format!("{} is not a key-value pair",s))?;
-                    KeyValue::valid_key(k)
-                        .or_then_err(|| format!("{} is not a valid key name",k))?;
-                    map.insert(k.to_string(),v.to_string());
-                }
+                let map = Flags::keyvalue_args(args)?;
                 Ok(if cmd=="set" {Query::Set(map)} else {Query::Seta(map)})
+            },
+            "invoke" => {
+                (args.len() > 0).or_err("invoke: custom-command [key1=value1 ...]")?;
+                let name = args[0].clone();
+                let map = Flags::keyvalue_args(&args[1..])?;
+                Ok(Query::Invoke(name,map))
             },
             "remove-group" => {
                 (args.len() == 1).or_err("remove-group: group-name")?;

@@ -294,6 +294,10 @@ impl MessageData {
                     println!("{}\t{}\t{}",resp[0],resp[1],diff);
                 }
             },
+            Query::Invoke(_,_) => {
+                let name = self.lookup_name(&id);
+                println!("{}\t{}\t{}",id,name,resp);
+            },
             Query::Group(_,_) => {
                 // a Get operation for collecting group members
                 let get = &resp[0];

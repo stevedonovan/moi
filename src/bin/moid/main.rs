@@ -6,6 +6,9 @@ extern crate toml;
 extern crate mosquitto_client;
 extern crate md5;
 
+mod plugin;
+use plugin::Plugins;
+
 const VERSION: &str = "0.1.2";
 
 use mosquitto_client::{Mosquitto,MosqMessage};
@@ -33,15 +36,18 @@ struct MsgData {
     seq: u8,
     m: Mosquitto,
     pending_buffer: Option<Vec<u8>>,
+    plugins: Plugins,
 }
 
 impl MsgData {
     fn new(cfg: Config, m: &Mosquitto) -> MsgData {
+        let cfg = make_shared(cfg);
         MsgData {
-            cfg: make_shared(cfg),
+            cfg: cfg.clone(),
             seq: 0,
             m: m.clone(),
             pending_buffer: None,
+            plugins: Plugins::new(cfg),
         }
     }
 
@@ -62,16 +68,6 @@ impl MsgData {
         object! {"id" => lock!(self.cfg).addr(), "seq" => self.seq, "error" => msg}
     }
 
-}
-
-// some built-in keys, evaluated on the fly
-// TODO obvious customization point...
-fn builtin_var(key: &str) -> Option<JsonValue> {
-    if key == "time" {
-        Some(current_time_as_secs().into())
-    } else {
-        None
-    }
 }
 
 // how a remote knows that a query is intended for itself
@@ -174,7 +170,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         let mut res = JsonValue::new_array();
         for s in args.members() {
             let s = as_str(s)?; // keys must be strings...
-            if let Some(val) = builtin_var(s) { // they may be Special
+            if let Some(val) = mdata.plugins.var(s) { // they may be Special
                 res.push(val)?;
             } else {
                 // but we return Null if not-found
@@ -316,7 +312,11 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         }
         Ok(res)
     } else {
-        Err(io_error(&format!("unknown command {}",verb)).into())
+        if let Some(res) = mdata.plugins.command(verb,args) {
+            Ok(res?)
+        } else {
+            Err(io_error(&format!("unknown command {}",verb)).into())
+        }
     }
 }
 

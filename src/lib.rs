@@ -77,6 +77,17 @@ pub fn make_shared<T> (t: T) -> SharedPtr<T> {
     Arc::new(Mutex::new(t))
 }
 
+pub trait MoiPlugin {
+
+    fn command(&mut self, _name: &str, _args: &JsonValue) -> Option<BoxResult<JsonValue>> {
+        None
+    }
+
+    fn var (&self, _name: &str) -> Option<JsonValue> {
+        None
+    }
+}
+
 pub fn current_time_as_secs() -> i64 {
     let now = time::SystemTime::now();
     now.duration_since(time::UNIX_EPOCH).unwrap().as_secs() as i64

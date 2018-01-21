@@ -263,6 +263,7 @@ pub enum Query {
     Ping(Instant),
     Chain(Vec<Query>),
     Actions(Vec<Query>),
+    Invoke(String,StringMap),
     Wait,
 }
 
@@ -340,6 +341,11 @@ impl Query {
                 object!{"chain" => res}
             },
             Query::Wait => JsonValue::Null,
+            Query::Invoke(ref op, ref kvs) => {
+                let mut res = JsonValue::new_object();
+                res[op] = to_jobject(kvs);
+                res
+            },
             Query::Actions(_) => panic!("used Actions directly!")
         }
     }
