@@ -19,7 +19,7 @@ in the remotes.
 For demonstration purposes, there's a set of JSON config files in the
 `examples` folder, and a script for launching four instances of the
 `moi` remote daemon, `moid`. It's assumed that Mosquitto is running
-on the local machine:
+on the local machine with the usual defaults:
 
 ```
 examples$ . devices.sh
@@ -457,14 +457,19 @@ into `moid`.
 
 ## A Start at Documentation
 
-### Keys
+### Keys and Configuration
 
 These are the keys always available from the remote:
 
   - `name`  settable, invoke `hostname` otherwise
   - `addr`  settable, look for non-local IP4 addresses otherwise.
+
      (Can specify `interface` in `moid` JSON config if there are
      multiple interfaces)
+  - `home`  settable, look at $HOME otherwise
+  - `bin` settable, default `/usr/local/bin`
+  - `tmp` settable, default `/tmp/MOID-{addr}`
+  - `self` settable, default working dir of `moid`
   - `time` time at the remote as Unix timestamp
   - `arch` processor architecture
   - `moid` version of `moid` running
@@ -473,6 +478,35 @@ These are the keys always available from the remote:
 
 Keys may consist of alphanumeric characters, plus underscore and dash.
 Periods are not valid!
+
+The first three settable vars are set in the TOML file for both `moi` and `moid`:
+
+```toml
+[config]
+name = "frodo"
+addr = "10.20.30.40"
+home = "stations/frodo"
+```
+`bin`, `tmp` and `self` likewise, but are only meaningful for `moid`.
+
+There is in addition three parameters in the `[config]` section for
+setting MQTT parameters:
+
+  - `mqtt_addr` - default 'localhost'
+  - `mqtt_port` - default 1883
+  - `mqtt_connect_wait` - default 300ms
+
+If TLS is used, there is a `[tls]` section. All files are resolved
+relative to `path`:
+
+```toml
+[tls]
+path = "."
+cafile = "server.crt"
+certfile = "ca.crt"
+keyfile = "ca.key"
+passphrase = "frodo"
+```
 
 ### Filters
 
@@ -546,5 +580,7 @@ The 'target' here can be one of three things:
   - an IPv4 address
   - a known name (requires the "all" group to be defined)
   - or a group
+
+`--name {target}` (`-n`) has the same effect as the `{target}:{dest}` notation.
 
 `moi` insists that there shall be only one such target specification on the command line.
