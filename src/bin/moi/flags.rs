@@ -1,6 +1,7 @@
 use lapp;
 use moi::*;
 use toml;
+use libc;
 use strutil;
 use query::*;
 use toml_utils::*;
@@ -73,7 +74,15 @@ impl Flags {
             process::exit(0);
         }
 
-        let moi_dir = env::home_dir().unwrap().join(".local").join("moi");
+        let mut root = false;
+        let base_dir = if unsafe { libc::geteuid() == 0 } {
+            root = true;
+            "/usr/local/etc".into()
+        } else {
+            env::home_dir().unwrap().join(".local")
+        };
+
+        let moi_dir = base_dir.join("moi");
         let default_config = moi_dir.join("config.toml");
         let json_store = moi_dir.join("store.json");
         if ! moi_dir.exists() {
@@ -114,7 +123,7 @@ impl Flags {
             timeout: args.get_integer("timeout"),
             verbose: args.get_bool("verbose"),
             quiet: args.get_bool("quiet"),
-            config_file: args.get_path("config"),
+            config_file: if root {default_config} else {args.get_path("config")},
             json_store: json_store,
             moi_dir: moi_dir,
      //       format: args.get_string("message_format"),
@@ -264,10 +273,10 @@ impl Flags {
     fn query_alias_collect(&mut self, t: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>) -> BoxResult<()> {
         // either the filter or the group can be overriden, but currently only in the first command
         // of a sequence
-        if let Some(filter) = gets(t,"filter")? {
+        if let Some(filter) = gets_opt(t,"filter")? {
             self.filter_desc = filter.into();
         } else
-        if let Some(group) = gets(t,"group")? {
+        if let Some(group) = gets_opt(t,"group")? {
             self.group_name = group.into();
         }
         if let Some(_) = t.get("quiet") {

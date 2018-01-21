@@ -4,6 +4,7 @@ extern crate mosquitto_client;
 extern crate lapp;
 extern crate toml;
 extern crate md5;
+extern crate libc;
 #[macro_use] extern crate log;
 // our own common crate (shared with daemon)
 #[macro_use]
@@ -11,15 +12,15 @@ extern crate moi;
 
 mod strutil;
 mod query;
-mod toml_utils;
 mod timeout;
 mod flags;
 mod commands;
 // mod output;
 
 use moi::*;
+use moi::toml_utils::*;
 use query::*;
-use toml_utils::*;
+//use toml_utils::*;
 //use flags::{Flags,CommandArgs};
 
 use mosquitto_client::Mosquitto;
@@ -389,29 +390,22 @@ fn run() -> BoxResult<bool> {
     let (commands,mut flags) = flags::Flags::new()?;
     let toml: toml::Value = read_to_string(&flags.config_file)?.parse()?;
     let config = toml.get("config").or_err("No [config] section")?;
-    config.is_table().or_err("config must be a table")?;
     let command_aliases = toml.get("commands");
 
-    let path: PathBuf = if let Some(log_file) = gets(config,"log_file")? {
+    let path: PathBuf = if let Some(log_file) = gets_opt(config,"log_file")? {
         log_file.into()
     } else {
         flags.moi_dir.join("moi.log")
     };
     logging::init(Some(&path),gets_or(config,"log_level","info")?)?;
 
-    let mut store = Config::new_from_file(&flags.json_store)?;
+    let mut store = Config::new_from_file(&config, &flags.json_store)?;
 
     if commands::handle_local_command(&commands,&flags,&store) {
         return Ok(true);
     }
 
-    let m = mosquitto_client::Mosquitto::new("moi");
-
-    m.connect_wait(
-        gets_or(config,"mqtt_addr","127.0.0.1")?,
-        geti_or(config,"mqtt_port",1883)? as u32,
-        geti_or(config,"mqtt_connect_wait",300)? as i32
-    )?;
+    let m = mosquitto_setup("moi",&config,&toml,flags.moi_dir.join("certs"))?;
 
     let query_resp = m.subscribe(QUERY_FILE_RESULT_TOPIC,1)?;
     let file_resp = m.subscribe(FILE_RESULT_TOPIC,1)?;

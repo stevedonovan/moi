@@ -2,6 +2,7 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate json;
 #[macro_use] extern crate moi;
+extern crate toml;
 extern crate mosquitto_client;
 extern crate md5;
 
@@ -11,6 +12,7 @@ use mosquitto_client::{Mosquitto,MosqMessage};
 use json::JsonValue;
 
 use moi::*;
+use moi::toml_utils::*;
 
 // we don't do Windows for now, sorry
 use std::os::unix::fs::OpenOptionsExt;
@@ -358,15 +360,15 @@ fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     Ok(res)
 }
 
-fn logging_init(cfg: &Config) -> BoxResult<()> {
+fn logging_init(cfg: &toml::Value, store: &Config) -> BoxResult<()> {
     let mut path;
-    let log_file = if let Some(file) = cfg.gets_opt("log_file")? {
+    let log_file = if let Some(file) = gets_opt(cfg,"log_file")? {
         path = PathBuf::from(file);
         if path.is_dir() {
             path = path.join("moid.log");
         } else
         if path.parent() == Some(Path::new("")) {
-            path = Path::new(&cfg.home()).join(path);
+            path = Path::new(&store.home()).join(path);
         }
         Some(path.as_path())
     } else {
@@ -374,7 +376,7 @@ fn logging_init(cfg: &Config) -> BoxResult<()> {
     };
     logging::init(
         log_file,
-        cfg.gets_or("log_level","info")
+        gets_or(cfg,"log_level","info")?
     )?;
     Ok(())
 }
@@ -386,50 +388,56 @@ fn run() -> BoxResult<()> {
         println!("MOI daemon version {}",VERSION);
         return Ok(());
     }
-    let mut config = Config::new_from_file(&PathBuf::from(file))?;
-    config.values.insert("moid".into(),VERSION.into());
-    config.values.insert("arch".into(),env::consts::ARCH.into());
-    if ! config.values.contains_key("bin") {
-        config.values.insert("bin".into(),"/usr/local/bin".into());
+    let toml: toml::Value = read_to_string(&file)?.parse()?;
+    let toml_config = toml.get("config").or_err("No [config] section")?;
+
+    // this is not quite right - the default location for the store
+    // must be always writeable (ditto logs)
+    let json_store = gets_or_then(toml_config,"store",|| {
+        format!("{}/store.json",gets(toml_config,"home").expect("home must be string"))
+    })?;
+
+    let mut store = Config::new_from_file(&toml_config, &PathBuf::from(json_store))?;
+    store.insert_into("moid",VERSION);
+    store.insert_into("arch",env::consts::ARCH);
+    store.insert_into("rc",0);
+
+    // some values in store must be configurable
+    store.insert_into("bin",
+        gets_or(toml_config,"bin","/usr/local/bin")?
+    );
+
+    store.insert_into("tmp",
+        gets_or_then(toml_config,"tmp",|| {
+            let tmp = env::temp_dir().join("MOID");
+            if ! tmp.exists() {
+                fs::create_dir(&tmp).expect("could not create tmp dir")
+            }
+            tmp.to_str().unwrap().to_string()
+        })?
+    );
+
+    if ! store.values.contains_key("self") {
+        store.insert_into("self",env::current_dir()?.to_str().unwrap());
     }
-    if ! config.values.contains_key("rc") {
-        config.values.insert("rc".into(),0.into());
-    }
-    if ! config.values.contains_key("self") {
-        config.values.insert("self".into(),env::current_dir()?.to_str().unwrap().into());
-    }
-    if ! config.values.contains_key("tmp") {
-        let tmp = env::temp_dir().join("MOID");
-        if ! tmp.exists() {
-            fs::create_dir(&tmp)
-                .map_err(|e| io_error(&format!("could not create tmp dir: {}",e)))?;
-        }
-        config.values.insert("tmp".into(),tmp.to_str().unwrap().into());
-    }
-    if ! config.values.contains_key("destinations") {
+    if ! store.values.contains_key("destinations") {
         let arr = array!["bin","tmp","home","self"];
-        config.values.insert("destinations".into(), arr );
+        store.insert_into("destinations", arr );
     }
 
-    logging_init(&config)?;
+    logging_init(&toml_config, &store)?;
 
     // VERY important that mosquitto client name is unique, otherwise Mosquitto has kittens
-    let mosq_name = format!("MOID-{}",&config.addr());
-    let m = Mosquitto::new(&mosq_name);
-    {
-        let addr = config.gets_or("mqtt_addr","127.0.0.1");
-        let port = config.geti_or("mqtt_port",1883)? as u32;
-        let connect_timeout = config.geti_or("mqtt_connect_timeout",200)?;
-        m.connect_wait(addr,port,connect_timeout)?;
-        info!("connected to {}:{}", addr,port);
-    }
+    let mosq_name = format!("MOID-{}",&store.addr());
+    let default_cert_dir = PathBuf::from(store.gets("self")?).join("certs");
+    let m = mosquitto_setup(&mosq_name,&toml_config,&toml,default_cert_dir)?;
 
     let query = m.subscribe(QUERY_TOPIC,1)?;
     let query_me = m.subscribe( // for speaking directly to us...
-            &format!("{}/{}",QUERY_TOPIC,config.addr()),
+            &format!("{}/{}",QUERY_TOPIC,store.addr()),
         1)?;
     let quit = m.subscribe(QUIT_TOPIC,1)?;
-    let mut mc = m.callbacks(MsgData::new(config,&m));
+    let mut mc = m.callbacks(MsgData::new(store,&m));
 
     mc.on_message(|mdata,msg| {
         // TODO error handling is still a mess

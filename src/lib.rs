@@ -1,11 +1,15 @@
 // Shared code between moi (the cli driver) and moid (the daemon)
 // Mostly manages a convenient JSON store
 extern crate json;
+extern crate toml;
+extern crate mosquitto_client;
 extern crate get_if_addrs;
-extern crate log;
+#[macro_use] extern crate log;
 extern crate time as timec;
 
 pub mod logging;
+pub mod toml_utils;
+use toml_utils::*;
 
 use std::path::{Path,PathBuf};
 use std::io;
@@ -184,12 +188,20 @@ pub fn array_of_strings(v: &JsonValue) -> io::Result<Vec<&str>> {
     v.members().map(|s| as_str(s)).collect()
 }
 
-pub fn field<'a>(o: &'a JsonValue, name: &str) -> io::Result<&'a JsonValue> {
+pub fn maybe_field<'a>(o: &'a JsonValue, name: &str) -> Option<&'a JsonValue> {
     let val = &o[name];
     if val.is_null() {
-        Err(io_error(&format!("required field {}",name)))
+        None
     } else {
+        Some(val)
+    }
+}
+
+pub fn field<'a>(o: &'a JsonValue, name: &str) -> io::Result<&'a JsonValue> {
+    if let Some(val) = maybe_field(o,name) {
         Ok(val)
+    } else {
+        Err(io_error(&format!("required field {}",name)))
     }
 }
 
@@ -215,7 +227,12 @@ use std::env;
 
 impl Config {
 
-    pub fn new_from_file(file: &Path) -> io::Result<Config> {
+    pub fn new_from_file(cfg: &toml::Value, file: &Path) -> BoxResult<Config> {
+
+        // initially the store may not exist - this is fine.
+        if ! file.exists() {
+            write_all(file,"{}\n")?;
+        }
         let s = read_to_string(file)?;
         let doc = json::parse(&s)
             .map_err(|e| io_error(&format!("json: {}",e)))?;
@@ -225,27 +242,32 @@ impl Config {
             map.insert(k.to_string(),v.clone());
         }
 
-        if ! map.contains_key("addr") {
-            let interface = match map.get("interface") {
-                Some(val) => val.to_string(),
-                None => "".into()
-            };
-            let ip4 = ip4_address(&interface,false).unwrap_or("127.0.0.1".into());
-            //println!("interface {} IP4 {}",interface,ip4);
-            map.insert("addr".into(),ip4.into());
-        }
-        if ! map.contains_key("name") {
-            let (_,name,_) = run_shell_command("hostname",None);
-            map.insert("name".into(),name.into());
-        }
-        if ! map.contains_key("home") {
-            map.insert("home".into(),env::var("HOME").unwrap().into());
-        }
-        Ok(Config{
+        let mut config = Config{
             values: map,
             file: file.into(),
             pending_file: None,
-        })
+        };
+
+        config.insert_into("addr",gets_or_then(cfg,"addr",|| {
+            let interface = gets_or(cfg,"interface","").expect("interface must be string");
+            let ip4 = ip4_address(interface,false).unwrap_or("127.0.0.1".into());
+            info!("deduced interface {} IP4 {}",interface,ip4);
+            ip4
+        })?);
+
+        config.insert_into("name",gets_or_then(cfg,"name",|| {
+            let (_,name,_) = run_shell_command("hostname",None);
+            name
+        })?);
+
+        config.insert_into("home",gets_or_then(cfg,"home",|| {
+            env::var("HOME").unwrap()
+        })?);
+        Ok(config)
+    }
+
+    pub fn insert_into<V: Into<JsonValue>>(&mut self, key: &str, val: V) {
+        self.values.insert(key.into(),val.into());
     }
 
     // setting a key to null clears it....
@@ -343,4 +365,31 @@ impl Config {
     pub fn name(&self) -> &str {
         self.gets("name").unwrap()
     }
+}
+
+pub fn mosquitto_setup(name: &str, config: &toml::Value, toml: &toml::Value, path_def: PathBuf) -> BoxResult<mosquitto_client::Mosquitto> {
+    use toml_utils::*;
+    let m = mosquitto_client::Mosquitto::new(name);
+
+    if let Some(tls) = toml.get("tls") {
+        let path: PathBuf = if let Some(path) = gets_opt(tls,"path")? {
+            path.into()
+        } else {
+            path_def
+        };
+        let cafile = path.join(gets(tls,"cafile")?);
+        let certfile = path.join(gets(tls,"certfile")?);
+        let keyfile = path.join(gets(tls,"keyfile")?);
+        let passphrase = gets_opt(tls,"passphrase")?;
+        //println!("{:?} {:?} {:?} {:?}",cafile,certfile,keyfile,passphrase);
+        m.tls_set(cafile,certfile,keyfile,passphrase)?;
+    }
+
+    {
+        let addr = gets_or(config,"mqtt_addr","127.0.0.1")?;
+        let port = geti_or(config,"mqtt_port",1883)? as u32;
+        info!("MQTT addr {} port {}",addr,port);
+        m.connect_wait(addr,port,geti_or(config,"mqtt_connect_wait",300)? as i32)?;
+    }
+    Ok(m)
 }

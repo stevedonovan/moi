@@ -1,18 +1,32 @@
 use toml;
-use moi::*;
+use super::*;
 use std::path::Path;
 
-pub fn gets<'a>(config: &'a toml::Value, key: &str) -> BoxResult<Option<&'a str>> {
+pub fn gets_opt<'a>(config: &'a toml::Value, key: &str) -> BoxResult<Option<&'a str>> {
     Ok(match config.get(key) {
         None => None,
         Some(v) => Some(v.as_str().or_then_err(|| format!("value of '{}' is not a string",key))?)
-    })    
+    })
+}
+
+pub fn gets<'a>(config: &'a toml::Value, key: &str) -> BoxResult<&'a str> {
+    match gets_opt(config,key)? {
+        Some(s) => Ok(s),
+        None => err_io(&format!("{} not found",key))
+    }
 }
 
 pub fn gets_or<'a>(config: &'a toml::Value, key: &str, def: &'static str) -> BoxResult<&'a str> {
-    Ok(match gets(config,key)? {
+    Ok(match gets_opt(config,key)? {
         Some(res) => res,
         None => def
+    })
+}
+
+pub fn gets_or_then<'a,C: FnOnce()->String>(config: &'a toml::Value, key: &str, def: C) -> BoxResult<String> {
+    Ok(match gets_opt(config,key)? {
+        Some(res) => res.to_string(),
+        None => def()
     })
 }
 
