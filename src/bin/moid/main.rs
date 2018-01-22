@@ -9,7 +9,7 @@ extern crate md5;
 mod plugin;
 use plugin::Plugins;
 
-const VERSION: &str = "0.1.2";
+const VERSION: &str = "0.1.3";
 
 use mosquitto_client::{Mosquitto,MosqMessage};
 use json::JsonValue;

@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::time::Instant;
 use std::collections::HashMap;
+use std::os::unix::fs::DirBuilderExt;
 
-
-const VERSION: &str = "0.1.2";
+const VERSION: &str = "0.1.3";
 
 const USAGE: &str = "
 Execute commands on devices
@@ -86,7 +86,12 @@ impl Flags {
         let default_config = moi_dir.join("config.toml");
         let json_store = moi_dir.join("store.json");
         if ! moi_dir.exists() {
-            fs::create_dir_all(&moi_dir)?;
+            let mut db = fs::DirBuilder::new();
+            db.recursive(true);
+            if root {
+                db.mode(0o700);
+            }
+            db.create(&moi_dir)?;
             write_all(&default_config,"[config]\nmqtt_addr = \"localhost\"\n")?;
             write_all(&json_store,"{}\n")?;
             println!("Creating {}.\nEdit mqtt_addr if necessary",default_config.display());

@@ -37,20 +37,10 @@ pub struct Plugins {
 
 impl Plugins {
     pub fn command(&mut self, name: &str, args: &JsonValue) -> Option<BoxResult<JsonValue>> {
-        for p in self.plugins.iter_mut() {
-            if let Some(res) = p.command(name,args) {
-                return Some(res)
-            }
-        }
-        None
+        self.plugins.iter_mut().filter_map(|p| p.command(name,args)).next()
     }
 
     pub fn var (&self, name: &str) -> Option<JsonValue> {
-        for p in self.plugins.iter() {
-            if let Some(var) = p.var(name) {
-                return Some(var)
-            }
-        }
-        None
+        self.plugins.iter().filter_map(|p| p.var(name)).next()
     }
 }

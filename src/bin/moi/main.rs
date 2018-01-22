@@ -254,7 +254,7 @@ impl MessageData {
             let mut f = fs::File::create(&dest)?;
             f.write_all(payload)?;
         } else {
-            return err_io(&format!("local dest subsitution failed {}",ff.local_dest.display()));
+            return err_io(&format!("local dest substitution failed {}",ff.local_dest.display()));
         }
         Ok(())
     }
@@ -307,10 +307,6 @@ impl MessageData {
                 ok = Some(self.handle_run_launch(&id,resp));
                 handled = true;
             },
-            //~ Query::Launch(_) => {
-                //~ // remote is saying 'fine I've launched process. Be patient'
-                //~ ok = None;
-            //~ },
             Query::Fetch(_) => {
                 // note: not currently used...
                 // contents coming over as MOI/fetch/{seq}/{addr}/{name}
