@@ -5,6 +5,7 @@
 extern crate toml;
 extern crate mosquitto_client;
 extern crate md5;
+extern crate libc;
 
 mod plugin;
 use plugin::Plugins;
@@ -30,6 +31,7 @@ use std::error::Error;
 
 const QUERY_TOPIC: &str = "MOI/query";
 const QUIT_TOPIC: &str = "MOI/quit";
+const ALIVE_TOPIC: &str = "MOI/alive";
 
 struct MsgData {
     cfg: SharedPtr<Config>,
@@ -360,22 +362,18 @@ fn handle_file(mdata: &mut MsgData, msg: &MosqMessage) -> io::Result<bool> {
     Ok(res)
 }
 
-fn logging_init(cfg: &toml::Value, store: &Config) -> BoxResult<()> {
-    let mut path;
-    let log_file = if let Some(file) = gets_opt(cfg,"log_file")? {
-        path = PathBuf::from(file);
-        if path.is_dir() {
-            path = path.join("moid.log");
-        } else
-        if path.parent() == Some(Path::new("")) {
-            path = Path::new(&store.home()).join(path);
-        }
-        Some(path.as_path())
-    } else {
-        None
-    };
+fn logging_init(cfg: &toml::Value, def: &str) -> BoxResult<()> {
+
+    let file = gets_or_then(cfg,"log_file",|| def.into())?;
+    let mut path = PathBuf::from(file);
+    if path.is_dir() {
+        path = path.join("moid.log");
+    } else
+    if path.parent() == Some(Path::new("")) {
+        path = Path::new(def).join(path);
+    }
     logging::init(
-        log_file,
+        Some(&path),
         gets_or(cfg,"log_level","info")?
     )?;
     Ok(())
@@ -391,13 +389,24 @@ fn run() -> BoxResult<()> {
     let toml: toml::Value = read_to_string(&file)?.parse()?;
     let toml_config = toml.get("config").or_err("No [config] section")?;
 
-    // this is not quite right - the default location for the store
-    // must be always writeable (ditto logs)
-    let json_store = gets_or_then(toml_config,"store",|| {
-        format!("{}/store.json",gets(toml_config,"home").expect("home must be string"))
-    })?;
+    let root = unsafe { libc::geteuid() == 0 };
+    let var_moid = if root {
+        let prefix = gets_or(toml_config,"prefix","/usr/local")?;
+        let var = gets_or_then(toml_config,"var",|| format!("{}/var",prefix))?;
+        gets_or_then(toml_config, "log_file", || {
+            let dir = format!("{}/moid",var);
+            if let Err(e) = fs::metadata(&dir) {
+                fs::create_dir(&dir).expect(&format!("cannot create moi dir: {}",e));
+            }
+            dir
+        })?
+    } else {
+        gets_or_then(toml_config,"home",|| env::var("HOME").expect("no damn HOME"))?
+    };
 
+    let json_store = gets_or_then(toml_config,"store",|| format!("{}/store.json",var_moid))?;
     let mut store = Config::new_from_file(&toml_config, &PathBuf::from(json_store))?;
+
     store.insert_into("moid",VERSION);
     store.insert_into("arch",env::consts::ARCH);
     store.insert_into("rc",0);
@@ -425,7 +434,7 @@ fn run() -> BoxResult<()> {
         store.insert_into("destinations", arr );
     }
 
-    logging_init(&toml_config, &store)?;
+    logging_init(&toml_config, &var_moid)?;
 
     // VERY important that mosquitto client name is unique, otherwise Mosquitto has kittens
     let mosq_name = format!("MOID-{}",&store.addr());
@@ -437,7 +446,29 @@ fn run() -> BoxResult<()> {
             &format!("{}/{}",QUERY_TOPIC,store.addr()),
         1)?;
     let quit = m.subscribe(QUIT_TOPIC,1)?;
+
+    let default_alive_msg = object!{"addr" => store.addr()}.to_string();
     let mut mc = m.callbacks(MsgData::new(store,&m));
+
+    // keepalive strategy for moid is to publish an "I'm alive!" message occaisionally
+    // TODO the payload must be customizable
+    let ping_timeout = geti_or(toml_config,"alive_interval",60)? as u64;
+    let thread_m = m.clone();
+    thread::spawn(move || {
+        let mut count = 0;
+        loop {
+            thread::sleep(Duration::from_secs(ping_timeout));
+            if let Err(__) = thread_m.publish(ALIVE_TOPIC,default_alive_msg.as_bytes(),1,false) {
+                count += 1;
+            }
+            if count > 3 { // three strikes and we're out...
+               if let Err(e) = thread_m.reconnect() {
+                   error!("three tries out: reconnect failed {}",e);
+               }
+               count = 0;
+            }
+        }
+    });
 
     mc.on_message(|mdata,msg| {
         // TODO error handling is still a mess

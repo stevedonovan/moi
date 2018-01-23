@@ -394,6 +394,22 @@ pub fn mosquitto_setup(name: &str, config: &toml::Value, toml: &toml::Value, pat
         let passphrase = gets_opt(tls,"passphrase")?;
         //println!("{:?} {:?} {:?} {:?}",cafile,certfile,keyfile,passphrase);
         m.tls_set(cafile,certfile,keyfile,passphrase)?;
+    } else
+    if let Some(tls_psk) = toml.get("tls_psk") {
+        let path: PathBuf = if let Some(path) = gets_opt(tls_psk,"path")? {
+            path.into()
+        } else {
+            path_def
+        };
+        let psk_keyfile = path.join(gets(tls_psk,"psk_file")?);
+        let text = read_to_string(&psk_keyfile)?;
+        let ciphers = gets_opt(tls_psk,"ciphers")?;
+        let (identity,key) = if let Some(idx) = text.find(':') {
+            (&text[0..idx], &text[idx+1..])
+        } else {
+            return err_io("psk key file is iden:bytes");
+        };
+        m.tls_psk_set(identity,key,ciphers)?;
     }
 
     {
