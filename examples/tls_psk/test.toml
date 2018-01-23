@@ -1,0 +1,15 @@
+[config]
+store = "test.json"
+mqtt_addr = "localhost"
+mqtt_port = 8883
+name = "TLS1"
+addr = "10.20.30.10"
+home = "."
+
+[tls-psk]
+path = "."
+psk_file = "psk.key"
+
+
+
+
