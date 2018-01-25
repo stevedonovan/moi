@@ -6,7 +6,7 @@ name = "TLS1"
 addr = "10.20.30.10"
 home = "."
 
-[tls-psk]
+[tls_psk]
 path = "."
 psk_file = "psk.key"
 

@@ -402,14 +402,15 @@ pub fn mosquitto_setup(name: &str, config: &toml::Value, toml: &toml::Value, pat
             path_def
         };
         let psk_keyfile = path.join(gets(tls_psk,"psk_file")?);
-        let text = read_to_string(&psk_keyfile)?;
+        let text = read_to_string(&psk_keyfile)?.trim_right_matches('\n').to_string();
         let ciphers = gets_opt(tls_psk,"ciphers")?;
         let (identity,key) = if let Some(idx) = text.find(':') {
             (&text[0..idx], &text[idx+1..])
         } else {
             return err_io("psk key file is iden:bytes");
         };
-        m.tls_psk_set(identity,key,ciphers)?;
+        //println!("identity {:?} key {:?} ciphers {:?}",identity,key,ciphers);
+        m.tls_psk_set(key,identity,ciphers)?;
     }
 
     {
