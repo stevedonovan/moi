@@ -379,6 +379,8 @@ fn logging_init(cfg: &toml::Value, def: &str) -> BoxResult<()> {
     Ok(())
 }
 
+use std::os::unix::fs::DirBuilderExt;
+
 fn run() -> BoxResult<()> {
     let file = std::env::args().nth(1).or_err("provide a config file")?;
     if file == "--version" {
@@ -392,11 +394,18 @@ fn run() -> BoxResult<()> {
     let root = unsafe { libc::geteuid() == 0 };
     let var_moid = if root {
         let prefix = gets_or(toml_config,"prefix","/usr/local")?;
-        let var = gets_or_then(toml_config,"var",|| format!("{}/var",prefix))?;
+        let var = gets_or_then(toml_config,"var",|| {
+            let dir = format!("{}/var",prefix);
+            if let Err(_) = fs::metadata(&dir) {
+                fs::create_dir(&dir).expect(&format!("cannot create var dir: {}",dir));
+            }
+            dir
+        })?;
         gets_or_then(toml_config, "log_file", || {
             let dir = format!("{}/moid",var);
-            if let Err(e) = fs::metadata(&dir) {
-                fs::create_dir(&dir).expect(&format!("cannot create moi dir: {}",e));
+            if let Err(_) = fs::metadata(&dir) { // it's private....
+                fs::DirBuilder::new().mode(0o700).create(&dir)
+                    .expect(&format!("cannot create moi dir: {}",dir));
             }
             dir
         })?

@@ -489,6 +489,12 @@ home = "stations/frodo"
 ```
 `bin`, `tmp` and `self` likewise, but are only meaningful for `moid`.
 
+`log_file` is not a variable but a parameter. If it's a directory then
+the log file is this directory with file name `moid.log`. If not
+specified, then `moid` tries to find a sensible _writeable_ default
+on the file system.  This depends on `prefix` (default "/usr/local"),
+so both the JSON store and the log file end up in "{prefix}/var/moid".
+
 There is in addition three parameters in the `[config]` section for
 setting MQTT parameters:
 
@@ -506,6 +512,23 @@ cafile = "server.crt"
 certfile = "ca.crt"
 keyfile = "ca.key"
 passphrase = "frodo"
+```
+
+(Look at the examples in `examples/tls`)
+
+If TLS-PSK is used, there is a `[tls_psk]` section. Again there is `path`
+with `psk_file` in that dir - this is in the same format as the `psk_file`
+line in `mosquitto.conf` - an identity followed by the key in hex.
+`examples/tls_psk` gives a simple example. If you _do_ have a secure way
+of provisioning your remotes with a copy of a key, then TLS-PSK is
+easier to set up. I made up a test key using the interactive Ruby prompt:
+
+```
+$ irb
+irb(main):001:0> require 'securerandom'
+=> true
+irb(main):002:0> SecureRandom.hex(256/8)
+=> "8d112be59602afb5445012ada3aed8c09afaee53b18aef8fa347d196e25d2f44"
 ```
 
 ### Filters
