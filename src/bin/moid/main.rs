@@ -25,6 +25,7 @@ use std::io::prelude::*;
 use std::path::{Path,PathBuf};
 use std::thread;
 use std::time;
+use std::process;
 
 //use std::collections::HashMap;
 use std::error::Error;
@@ -458,10 +459,11 @@ fn run() -> BoxResult<()> {
 
     let default_alive_msg = object!{"addr" => store.addr()}.to_string();
     let mut mc = m.callbacks(MsgData::new(store,&m));
-
+    
     // keepalive strategy for moid is to publish an "I'm alive!" message occaisionally
     // TODO the payload must be customizable
     let ping_timeout = geti_or(toml_config,"alive_interval",60)? as u64;
+    let do_reconnect = gets_or(toml_config,"alive_action","reconnect")? == "reconnect";
     let thread_m = m.clone();
     thread::spawn(move || {
         let mut count = 0;
@@ -471,8 +473,14 @@ fn run() -> BoxResult<()> {
                 count += 1;
             }
             if count > 3 { // three strikes and we're out...
-               if let Err(e) = thread_m.reconnect() {
-                   error!("three tries out: reconnect failed {}",e);
+               error!("three tries out: reconnecting..."); 
+               if do_reconnect {
+                   if let Err(e) = thread_m.reconnect() {
+                       error!("three tries out: reconnect failed {}",e);
+                       process::exit(1);
+                   }
+               } else {
+                   process::exit(1);
                }
                count = 0;
             }
