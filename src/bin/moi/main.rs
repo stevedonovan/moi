@@ -397,9 +397,15 @@ fn run() -> BoxResult<bool> {
     } else {
         flags.moi_dir.join("moi.log")
     };
-    logging::init(Some(&path),gets_or(config,"log_level","info")?)?;
+    // we DON'T log non-su moi invocations if there's a su install
+    let log_file = if flags.sharing_with_su { None } else { Some(path.as_path()) };
+    logging::init(log_file,gets_or(config,"log_level","info")?)?;
 
-    let mut store = Config::new_from_file(&config, &flags.json_store)?;
+    let json_store = match gets_opt(config,"store")? {
+        Some(s) => PathBuf::from(s),
+        None => flags.json_store.clone()
+    };
+    let mut store = Config::new_from_file(&config, &json_store)?;
 
     if commands::handle_local_command(&commands,&flags,&store) {
         return Ok(true);
@@ -416,7 +422,15 @@ fn run() -> BoxResult<bool> {
     // parse the command and create a Query
     // This looks up any command aliases and may modify
     // flags.group or flags.filter
-    let query = flags.construct_query_alias(command_aliases, &commands)?;
+    // By default, ordinary moi users are restricted in what commands
+    // they can execute - basically just forms of 'ls'. However,
+    // command aliases in the moi superuser directory are not restricted.
+    let restricted = if flags.su {
+        false
+    } else {
+        gets_or(&config,"restricted","yes")? == "yes"
+    };
+    let query = flags.construct_query_alias(command_aliases, &commands, restricted)?;
 
     // message data is managed by mosquitto on_message handler
     let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet);

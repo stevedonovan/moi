@@ -31,7 +31,7 @@ configuration file in TOML format.
 ```
 moi$ moi ls
 Creating /home/steve/.local/moi/config.toml.
-Edit mqtt_addr if necessary
+Edit mqtt_addr and restricted if necessary
 10.10.10.10	frodo
 10.10.10.22	merry
 10.10.10.23	pippin
@@ -71,6 +71,13 @@ moi$ moi --filter addr=10.10.10.1# ls
 There is a slight delay when executing these commands, because a timeout
 is used when collecting all the responses (you can use `--timeout`(`-T`) to
 specify a different value in milliseconds.)
+
+At this point, for purposes of experimentation, you have to tell `moi` to relax.
+Edit `~/.local/moi/config.toml` and ensure that `restricted = "no"`. Generally
+administrators dislike tools that automatically grant ordinary users superuser
+rights over effectively a whole fleet of remote machines, so by default, non-sudo
+`moi` basically just lets users list keys. However, the administrator can define
+new commands (aliases) which _can_ be used by non-privileged use of `moi`.
 
 It's recommended to immediately create the "all" _group_. "all" is considered
 special, because `moi` will use it to map addresses to names when displaying
@@ -173,6 +180,15 @@ df -h / | awk '{getline; print $4}'
 scratch$ moi -f name=jessie push-run space tmp './space'
 192.168.0.13	jessie	18G
 ```
+
+There is an alternative shortcut notation which works with all file and run commands.
+```
+scratch$ moi push-run space jessie:tmp './space'
+```
+Here we specify the device(s) using `{name}:{dest}`, where the name can be an
+address, an actual remote name, or a group. It's a little easier to type
+and is suggested by the syntax used by `ssh`.
+
 `push-run` is a convenient shortcut - `moi` supports multi-staged commands separated
 by "::".
 
@@ -411,7 +427,7 @@ respawn
 
 chdir /usr/local/etc
 
-exec ./moid device.json
+exec ./moid moid.toml
 
 post-stop script
   if test -e moid-*
@@ -422,6 +438,19 @@ post-stop script
 end script
 
 ```
+where `moid.toml` looks like this:
+
+```toml
+[config]
+mqtt_addr = "{broker-address}"
+home = "{home-dir}
+```
+You might also need to specify `mqtt_port` if your broker is not running
+on the default 1883 port, and of course TLS configuration if your
+connection is encrypted. Please note that (currently) you _must_
+specify `home` because init systems like `upstart` and `systemd` do _not_
+pass through a `HOME` environment variable.
+
 The actual directories are not important (feelings on the subject can get
 both strong and confused) but note the action after the service has stopped:
 it will copy a new file over `moid` if it exists. So it is straightforward
@@ -442,7 +471,7 @@ After=multi-user.target
 
 [Service]
 WorkingDirectory=/usr/local/bin
-ExecStart=/usr/local/bin/moid /usr/local/etc/store.json
+ExecStart=/usr/local/bin/moid /usr/local/etc/moid.toml
 Restart=always
 ExecStopPost=/usr/local/etc/restart-moid
 
@@ -451,9 +480,7 @@ WantedBy=multi-user.target
 ```
 
 The ease of updating `moid` as a single executable with no dependencies
-makes it a good candidate for _customization_. So the idea is to provide
-straightforward documented ways for statically linking extra functionality
-into `moid`.
+makes it a good candidate for _customization_.
 
 ## A Start at Documentation
 
@@ -607,3 +634,138 @@ The 'target' here can be one of three things:
 `--name {target}` (`-n`) has the same effect as the `{target}:{dest}` notation.
 
 `moi` insists that there shall be only one such target specification on the command line.
+
+### Customizing `moid`
+
+There is a trait defined that plugins must implement in the base `moi` lib:
+
+```rust
+pub trait MoiPlugin {
+
+    fn command(&mut self, _name: &str, _args: &JsonValue) -> Option<BoxResult<JsonValue>> {
+        None
+    }
+
+    fn var (&self, _name: &str) -> Option<JsonValue> {
+        None
+    }
+}
+```
+So there are two ways to customize `moid`
+
+  - define _extra commands_. These receive JSON-encoded arguments, and return a JSON-encoded
+  result. They are allowed to object to badly-formed requests.
+  - define _extra variables/keys_. These are _computed variables_.
+
+The site for customization is `src/bin/moid/plugin.rs` - note that the built-in computed
+variable `time` is itself implemented as a plugin!
+
+```rust
+impl MoiPlugin for Builtins {
+    fn var (&self, name: &str) -> Option<JsonValue> {
+        if name == "time" {
+            Some(current_time_as_secs().into())
+        } else {
+            None
+        }
+    }
+}
+
+fn builtin_init() -> Box<MoiPlugin> {
+    Box::new(Builtins)
+}
+
+impl Plugins {
+    pub fn new(_cfg: SharedPtr<Config>) -> Plugins {
+        Plugins {
+            plugins: vec![
+                builtin_init(),
+            ]
+        }
+    }
+}
+
+pub struct Plugins {
+    plugins: Vec<Box<MoiPlugin>>
+}
+```
+To register your own plugin, you currently need to add your boxed plugin struct
+to the vector in `Plugins::new`. Note that you have the JSON store available
+as an `Arc<Mutex<Config>>` which you can clone.
+
+Here is an example of a custom plugin module:
+
+```rust
+// myplugin.rs
+use moi::*;
+use json::JsonValue;
+
+struct MyPlugin{ cfg: SharedPtr<Config> }
+
+impl MyPlugin {
+    fn myset(&self, args: &JsonValue) -> BoxResult<JsonValue> {
+        let mut config = self.cfg.lock().unwrap();
+        for (key,val) in args.entries() {
+            config.insert(key, val);
+        }
+        // and persist...
+        config.write()?;
+        Ok(JsonValue::from(true))
+    }
+}
+
+impl MoiPlugin for MyPlugin {
+    fn command(&mut self, name: &str, args: &JsonValue) -> Option<BoxResult<JsonValue>> {
+        if name == "myset" {
+            Some(self.myset(args))
+        } else {
+            None
+        }
+    }
+}
+
+pub fn init(cfg: SharedPtr<Config>) -> Box<MoiPlugin> {
+    Box::new(MyPlugin{cfg: cfg})
+}
+```
+It is (in fact) a copy of the implementation of the built-in command `set`!
+
+To use, first put `mod myplugin` in `src/bin/moid/main.rs`, and `use myplugin`
+in `src/bin/moid/plugin.rs` (Rust's module system can sometimes be a pain -
+it requires that the module be registered at the top-level.)
+
+Then the registration code becomes:
+
+```rust
+impl Plugins {
+    pub fn new(_cfg: SharedPtr<Config>) -> Plugins {
+        Plugins {
+            plugins: vec![
+                builtin_init(),
+                myplugin::init(_cfg.clone()),
+            ]
+        }
+    }
+}
+```
+
+Of course, new commands need a new meta-command to _invoke_ them. We pass the new
+command a set of key-value pairs (the values must currently be strings but this
+restriction may be lifted). After restarting our fake remotes:
+
+```
+examples$ sudo moi invoke myset A=1 B=2
+10.10.10.10	frodo	true
+10.10.10.22	merry	true
+10.10.10.23	pippin	true
+10.10.10.11	bilbo	true
+examples$ moi ls A B
+10.10.10.10	frodo	1	2
+10.10.10.22	merry	1	2
+10.10.10.23	pippin	1	2
+10.10.10.11	bilbo	1	2
+```
+This particular plugin did not need a mutable reference to the struct, but
+generally commands do mutate state!
+
+

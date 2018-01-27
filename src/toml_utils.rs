@@ -37,21 +37,21 @@ pub fn geti_or(config: &toml::Value, key: &str, def: i64) -> BoxResult<i64> {
     })
 }
 
-pub fn maybe_toml_config(name: &str, home: &Path) -> BoxResult<Option<toml::Value>> {
+pub fn maybe_toml_config(name: &str, home: &Path) -> BoxResult<Option<(bool,toml::Value)>> {
     let path = Path::new(name).with_extension("toml");
-    let maybe_path = if path.exists() {
-        Some(path)
+    let (local,maybe_path) = if path.exists() {
+        (true,Some(path))
     } else {
         let path = home.join(name).with_extension("toml");
         if path.exists() {
-            Some(path)
+            (false,Some(path))
         } else {
-            None
+            (false,None)
         }
     };
     if let Some(path) = maybe_path {
         let toml: toml::Value = read_to_string(&path)?.parse()?;
-        Ok(Some(toml))
+        Ok(Some((local,toml)))
     } else {
         Ok(None)
     }

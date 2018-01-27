@@ -10,7 +10,7 @@ extern crate libc;
 mod plugin;
 use plugin::Plugins;
 
-const VERSION: &str = "0.1.3";
+const VERSION: &str = "0.1.4";
 
 use mosquitto_client::{Mosquitto,MosqMessage};
 use json::JsonValue;
@@ -459,7 +459,7 @@ fn run() -> BoxResult<()> {
 
     let default_alive_msg = object!{"addr" => store.addr()}.to_string();
     let mut mc = m.callbacks(MsgData::new(store,&m));
-    
+
     // keepalive strategy for moid is to publish an "I'm alive!" message occaisionally
     // TODO the payload must be customizable
     let ping_timeout = geti_or(toml_config,"alive_interval",60)? as u64;
@@ -473,7 +473,7 @@ fn run() -> BoxResult<()> {
                 count += 1;
             }
             if count > 3 { // three strikes and we're out...
-               error!("three tries out: reconnecting..."); 
+               error!("three tries out: reconnecting...");
                if do_reconnect {
                    if let Err(e) = thread_m.reconnect() {
                        error!("three tries out: reconnect failed {}",e);
