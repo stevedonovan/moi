@@ -2,6 +2,10 @@ use toml;
 use super::*;
 use std::path::Path;
 
+pub fn as_string(v: &toml::Value) -> BoxResult<String> {
+    v.as_str().or_err("not a string").map_err(|e| e.into()).map(|s| s.into())
+}
+
 pub fn gets_opt<'a>(config: &'a toml::Value, key: &str) -> BoxResult<Option<&'a str>> {
     Ok(match config.get(key) {
         None => None,
@@ -58,7 +62,6 @@ pub fn maybe_toml_config(name: &str, home: &Path) -> BoxResult<Option<(bool,toml
 }
 
 pub fn toml_strings (t: &Vec<toml::Value>) -> BoxResult<Vec<String>> {
-    // TODO that unwrap is bad, man! Return a result properly
-    Ok(t.into_iter().map(|s| s.as_str().unwrap().to_string()).collect())
+    t.into_iter().map(|s| as_string(s)).collect()
 }
 

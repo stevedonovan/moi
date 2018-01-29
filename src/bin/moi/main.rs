@@ -20,16 +20,14 @@ mod commands;
 use moi::*;
 use moi::toml_utils::*;
 use query::*;
-//use toml_utils::*;
-//use flags::{Flags,CommandArgs};
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
 
-use std::path::{PathBuf};
-use std::time::{Duration};
+use std::path::PathBuf;
+use std::time::Duration;
 use std::collections::HashMap;
-use std::{fs,io,thread};
+use std::{fs,io,thread,process};
 use std::io::prelude::*;
 use std::error::Error;
 
@@ -532,7 +530,7 @@ fn run() -> BoxResult<bool> {
             if let Err(e) = data.handle_fetch(parms,msg.payload(),&mut id) {
                 eprintln!("pull error: {}",e);
                 error!("pull error: {}",e);
-                std::process::exit(1);
+                process::exit(1);
             }
             data.response(id,true,false);
         }
@@ -549,7 +547,7 @@ fn run() -> BoxResult<bool> {
                 // bail out, our business is finished
                 if let Err(e) = m.disconnect() {
                     println!("disconnect error {}",e);
-                    std::process::exit(1);
+                    process::exit(1);
                 }
             } else {
                 // aha, there's another query in the pipeline...
@@ -591,7 +589,7 @@ fn main() {
     match run() {
         Ok(ok) => {
             if ! ok {
-                std::process::exit(1);
+                process::exit(1);
             }
         },
         Err(e) => {

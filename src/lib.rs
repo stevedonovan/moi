@@ -272,7 +272,7 @@ impl Config {
         })?);
 
         config.insert_into("home",gets_or_then(cfg,"home",|| {
-            env::var("HOME").unwrap()
+            env::var("HOME").expect("$HOME not defined. Set 'home' in config")
         })?);
         Ok(config)
     }
@@ -293,7 +293,6 @@ impl Config {
     // the idea is NOT to add values if already present in the array
     // Must ask explicitly to remove tho
     pub fn insert_array(&mut self, key: &str, val: &JsonValue, remove: bool) -> io::Result<()> {
-        //println!("insert {} {} {}",key,val,remove);
         let arr = self.values.entry(key.into())
             .or_insert_with(|| JsonValue::new_array());
         (arr.is_array()).or_then_err(|| format!("{} is not array-valued",key))?;
@@ -392,7 +391,7 @@ pub fn mosquitto_setup(name: &str, config: &toml::Value, toml: &toml::Value, pat
         let certfile = path.join(gets(tls,"certfile")?);
         let keyfile = path.join(gets(tls,"keyfile")?);
         let passphrase = gets_opt(tls,"passphrase")?;
-        //println!("{:?} {:?} {:?} {:?}",cafile,certfile,keyfile,passphrase);
+        info!("TLS {:?} {:?} {:?} {:?}",cafile,certfile,keyfile,passphrase);
         m.tls_set(cafile,certfile,keyfile,passphrase)?;
     } else
     if let Some(tls_psk) = toml.get("tls_psk") {
@@ -409,7 +408,7 @@ pub fn mosquitto_setup(name: &str, config: &toml::Value, toml: &toml::Value, pat
         } else {
             return err_io("psk key file is iden:bytes");
         };
-        //println!("identity {:?} key {:?} ciphers {:?}",identity,key,ciphers);
+        info!("TLS-PSK identity {:?} key {:?} ciphers {:?}",identity,key,ciphers);
         m.tls_psk_set(key,identity,ciphers)?;
     }
 

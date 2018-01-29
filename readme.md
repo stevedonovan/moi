@@ -1,4 +1,4 @@
-# MOI MQTT Orchestration Interface
+    # MOI MQTT Orchestration Interface
 
 `moi` came about from a need to manage private networks of embedded Linux devices.
 We were already using MQTT with Mosquitto for data passing, so it made sense
@@ -12,7 +12,8 @@ with a JSON result.
 We had been investigating Salt Stack in a similar context, and `moi` is in
 some ways a reaction to Salt: small, focussed, assuming that the remote
 devices are Unix-like. We can always lean on a minimal POSIX environment
-in the remotes.
+in the remotes, and use shell to do the actual work rather than some
+dialect of YAML.
 
 ## No Server (except for broker) just Client
 
@@ -24,7 +25,7 @@ on the local machine with the usual defaults:
 ```
 examples$ . devices.sh
 ```
-From another terminal, can now run the command-line interface.
+You can now run the command-line interface.
 The first time `moi` is run, it will create itself a default
 configuration file in TOML format.
 
@@ -78,6 +79,8 @@ administrators dislike tools that automatically grant ordinary users superuser
 rights over effectively a whole fleet of remote machines, so by default, non-sudo
 `moi` basically just lets users list keys. However, the administrator can define
 new commands (aliases) which _can_ be used by non-privileged use of `moi`.
+(If using TLS, all operations should be via `sudo` since we must
+keep our certificates private.)
 
 It's recommended to immediately create the "all" _group_. "all" is considered
 special, because `moi` will use it to map addresses to names when displaying
@@ -111,7 +114,7 @@ remote did not respond.
 
 Can simulate
 this with the `restart` command, which stops a remote (it has this name because
-when run as a service this will result in it being respawned)
+when `moid` runs as a service this will result in it being respawned)
 
 ```
 moi$ moi -f name=merry restart
