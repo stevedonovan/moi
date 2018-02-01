@@ -405,8 +405,17 @@ fn run() -> BoxResult<bool> {
     };
     let mut store = Config::new_from_file(&config, &json_store)?;
 
-    if commands::handle_local_command(&commands,&flags,&store) {
-        return Ok(true);
+    {
+        let cmds = commands::CommandHandler::new(&flags,&store,&toml);
+        match commands[0].command.as_str() {
+            "groups" => {
+                return cmds.groups();
+            },
+            "commands" => {
+                return cmds.custom_commands();
+            },
+            _ => {}
+        }
     }
 
     let m = mosquitto_setup("moi",&config,&toml,flags.moi_dir.join("certs"))?;
