@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::os::unix::fs::DirBuilderExt;
 use io::prelude::*;
 
-const VERSION: &str = "0.1.4";
+const VERSION: &str = "0.1.5";
 
 const USAGE: &str = "
 Execute commands on devices
@@ -27,7 +27,7 @@ Execute commands on devices
             KEY.not.VALUE test for values not equal to VALUE
   -g, --group (default none) for a predefined group
   -n, --name (default none) for either address, name or group
-  -T, --timeout (default 300) timeout for accessing all devices
+  -T, --timeout (default 500) timeout for accessing all devices
   -v, --verbose tell us all about what's going on...
   -q, --quiet output only on error
   -m, --message-format (default plain) one of plain,csv or json

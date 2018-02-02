@@ -426,10 +426,11 @@ fn run() -> BoxResult<()> {
         gets_or(toml_config,"bin","/usr/local/bin")?
     );
 
+    let addr = store.addr().to_string();
     store.insert_into("tmp",
         gets_or_then(toml_config,"tmp",|| {
-            let tmp = env::temp_dir().join("MOID");
-            if ! tmp.exists() {
+            let tmp = env::temp_dir().join(&format!("MOID-{}",addr));
+            if ! tmp.is_dir() {
                 fs::create_dir(&tmp).expect("could not create tmp dir")
             }
             tmp.to_str().unwrap().to_string()
