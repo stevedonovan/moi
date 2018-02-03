@@ -105,7 +105,7 @@ impl Flags {
             fs::DirBuilder::new().recursive(true).create(&moi_dir)?;
             let mut f = fs::File::create(&default_config)?;
             write!(f,"[config]\nmqtt_addr = \"localhost\"\n")?;
-            write!(f,"restricted = \"{}\"\n",if root {"no"} else {"yes"})?;
+            write!(f,"restricted = \"{}\"\n",if root {"yes"} else {"no"})?;
             write_all(&json_store,"{}\n")?;
             println!("Creating {}.\nEdit mqtt_addr and restricted if necessary",default_config.display());
             if root {
