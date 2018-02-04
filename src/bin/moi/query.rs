@@ -274,8 +274,8 @@ fn pair_map(name: &str, value: &str) -> StringMap {
 }
 
 impl Query {
-    pub fn get<T: ToString> (v: Vec<T>, command: &str) -> Query {
-        let mut args: Vec<String> = v.into_iter().map(|s| s.to_string()).collect();
+    pub fn get<T: ToString> (v: &[T], command: &str) -> Query {
+        let mut args: Vec<String> = v.iter().map(|s| s.to_string()).collect();
 
         if ! args.iter().any(|s| s=="name") {
             args.insert(0,"name".into());
@@ -302,7 +302,7 @@ impl Query {
         Query::Group(
             name.into(),
             Box::new(Query::Chain(vec![
-                Query::get(vec!["addr","name"],"group"),
+                Query::get(&["addr","name"],"group"),
                 Query::Seta(pair_map("groups",name))
             ]))
         )

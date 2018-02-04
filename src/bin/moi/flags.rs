@@ -189,10 +189,10 @@ impl Flags {
         }
         match cmd {
             "ls" => {
-                Ok(Query::get(args.to_vec(),cmd.into()))
+                Ok(Query::get(args,cmd.into()))
             },
             "time" => {
-                Ok(Query::Get(vec!["addr".into(),"name".into(),"time".into()],cmd.into()))
+                Ok(Query::get(&["time"],cmd.into()))
             },
             "ping" => {
                 Ok(Query::Ping(Instant::now()))
