@@ -302,7 +302,7 @@ impl Flags {
             .as_array().or_err("alias: args must be array")?
         )?;
         let alias_args = strutil::replace_dollar_args_array(&alias_args,&cmd.arguments)
-            .map_err(|e| io_error(&format!("{} {} {}",cmd.command, help, e)))?;
+            .map_err(|e| io_error(&format!("{} '{}' - {}",cmd.command, help, e)))?;
 
         if self.verbose {
             println!("alias command {} args {:?}",alias_command,alias_args);

@@ -26,12 +26,17 @@ where F: Fn(String,Option<String>) -> BoxResult<String> {
     while let Some(pos) = s.find(startc) {
         res.push_str(&s[0..pos]);
         s = &s[pos+1..]; // skip $ or %
-        let mut chars = s.chars();        
-        // Either $N, 
+        if s.starts_with(startc) {
+            res.push(startc);
+            s = &s[1..];
+            continue;
+        }
+        let mut chars = s.chars();
+        // Either $N,
         let mut extra = None;
         let mut skip = 1;
         let mut ch = chars.next().or_then_err(|| format!("{} at end of subst",startc))?;
-        if ch == '(' { // $(N) or $(N:OP)             
+        if ch == '(' { // $(N) or $(N:OP)
             ch = chars.next().or_err(NO_CLOSING)?;
             let next = chars.next().or_err(NO_CLOSING)?;
             if next == ':' {
