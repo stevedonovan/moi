@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::os::unix::fs::DirBuilderExt;
 use io::prelude::*;
 
-const VERSION: &str = "0.1.5";
+const VERSION: &str = "0.1.6";
 
 const USAGE: &str = "
 Execute commands on devices
@@ -28,6 +28,7 @@ Execute commands on devices
   -g, --group (default none) for a predefined group
   -n, --name (default none) for either address, name or group
   -T, --timeout (default 500) timeout for accessing all devices
+  -j, --json  JSON output
   -v, --verbose tell us all about what's going on...
   -q, --quiet output only on error
   -m, --message-format (default plain) one of plain,csv or json
@@ -74,6 +75,7 @@ pub struct Flags {
     pub quiet: bool,
     pub su: bool,
     pub sharing_with_su: bool,
+    pub json: bool,
    // format: String,
 }
 
@@ -151,7 +153,7 @@ impl Flags {
             moi_dir: moi_dir,
             su: root,
             sharing_with_su: sharing,
-     //       format: args.get_string("message_format"),
+            json: args.get_bool("json"),
         }))
 
     }
@@ -180,7 +182,7 @@ impl Flags {
             spec
         })
     }
-
+    
     // implement our commands as Query enum values
     fn construct_query(&mut self, cmd: &str, args: &[String], restricted: bool) -> BoxResult<Query> {
         use strutil::strings;

@@ -41,10 +41,36 @@ const FILE_TOPIC_PREFIX: &str = "MOI/file";
 const TIMEOUT_TOPIC: &str = "MOI/pvt/timeout";
 const PROCESS_FETCH_TOPIC: &str = "MOI/fetch/";
 
+pub fn json_start(cmd: &str) {
+    print!("{{\"cmd\":{:?},",cmd);
+}
+
+pub fn json_output(j: JsonValue, cols: &[&str], finish: bool) {
+    let mut res = String::new();
+    for (e,col) in j.members().zip(cols) {
+        let es = e.to_string();
+        let es = if e.is_string() {
+            format!("{:?}",es)
+        } else {
+            es
+        };
+        res.push_str(&format!("{:?}:{}",col,es));
+        res.push(',');
+    }    
+    if finish {
+        res.pop();
+        res.push('}');    
+        println!("{}",res);
+    } else {
+        print!("{}",res);
+    }
+}
+
 struct MessageData {
     m: Mosquitto,
     sent_file: Option<String>, // can get this out of query, actually
     query: Vec<Query>,
+    commands: Vec<flags::CommandArgs>,
     filter: Condition,
     all_group: JsonValue,
     maybe_group: Option<String>, // means group operation
@@ -56,15 +82,17 @@ struct MessageData {
     seq: u8,
     verbose: bool,
     quiet: bool,
-   // formatter: output::Output,
+    json: bool,
+   
 }
 
 impl MessageData {
-    fn new (m: &Mosquitto, verbose: bool, quiet: bool) -> MessageData { // , formatter: output::Output
+    fn new (m: &Mosquitto, verbose: bool, quiet: bool, json: bool, commands: Vec<flags::CommandArgs>) -> MessageData {
         MessageData {
             m: m.clone(),
             sent_file: None,
             query: Vec::new(),
+            commands: commands,
             filter: Condition::None,
             all_group: JsonValue::Null,
             maybe_group: None,
@@ -75,7 +103,7 @@ impl MessageData {
             seq: 0,
             verbose: verbose,
             quiet: quiet,
-            //formatter: formatter
+            json: json,
         }
     }
 
@@ -142,7 +170,13 @@ impl MessageData {
     // finished when we have collected all members.
     fn response(&mut self, id: String, ok: bool, handled: bool) {
         if ! ok && ! handled {
-            eprintln!("{} {} failed",id,self.lookup_name(&id));
+            let name = self.lookup_name(&id);
+            if ! self.json {
+                error!("{} {} failed",id,name);
+            } else {
+                json_start(&self.current_command().command);
+                json_output(array![id.as_str(),name.as_str(),false,"failed"],&["addr","name","ok","error"],true);
+            }
         }
         if self.verbose {
             println!("response {} {} {}",id,ok,handled);
@@ -161,6 +195,10 @@ impl MessageData {
 
     fn current_query(&self) -> &Query {
         &self.query[self.seq as usize]
+    }
+    
+    fn current_command(&self) -> &flags::CommandArgs {
+        &self.commands[self.seq as usize]
     }
 
     fn set_queries(&mut self, q: Query) {
@@ -219,18 +257,25 @@ impl MessageData {
         let stdout = resp["stdout"].to_string();
         let stderr = resp["stderr"].to_string();
         let output = if code == 0 {stdout} else {stderr};
-        let multiline = output.find('\n').is_some();
-        let (delim,post) = if multiline {(":\n","\n")} else {("\t","")};
         let name = self.lookup_name(id);
-        if code == 0 {
-            if ! self.quiet {
-                println!("{}\t{}{}{}{}",id,name,delim,output,post);
+        if ! self.json {
+            let multiline = output.find('\n').is_some();
+            let (delim,post) = if multiline {(":\n","\n")} else {("\t","")};
+            
+            if code == 0 {
+                if ! self.quiet {
+                    println!("{}\t{}{}{}{}",id,name,delim,output,post);
+                }
+                true
+            } else {
+                println!("{}\t{}{}(code {}): {}{}",id,name,delim,code,output,post);
+                // important: failed remote commands must count as failures
+                false
             }
-            true
         } else {
-            println!("{}\t{}{}(code {}): {}{}",id,name,delim,code,output,post);
-            // important: failed remote commands must count as failures
-            false
+            json_start("run");
+            json_output(array![id,name,code==0,code,output],&["addr","name","ok","code","output"],true);
+            code == 0
         }
     }
 
@@ -258,29 +303,43 @@ impl MessageData {
     }
 
 
-    fn handle_response(&mut self, id: String, resp: JsonValue) {
+    fn handle_response(&mut self, id: String, mut resp: JsonValue) {
         let mut ok = Some(true);
         let mut handled = false;
         // need a split borrow here, hence repeated code
         match self.query[self.seq as usize] {
-            Query::Get(_, ref command) => {
+            Query::Get(ref cols, ref command) => {
                 match command.as_str() {
                     "ls" =>  {
-                        // Ugly. It will get Better...
-                        let n = resp.len();
-                        for idx in 0..n {
-                            let r = &resp[idx];
-                            print!("{}",r);
-                            if idx < n-1 {
-                                print!("\t");
+                        if ! self.json {
+                            // Ugly. It will get Better...
+                            let n = resp.len();
+                            for idx in 0..n {
+                                let r = &resp[idx];
+                                print!("{}",r);
+                                if idx < n-1 {
+                                    print!("\t");
+                                }
                             }
+                            println!();
+                        } else {
+                            let cols: Vec<_> = cols.iter().map(|s| s.as_str()).collect();
+                            json_start("ls");
+                            json_output(resp,&cols,false);
+                            json_output(array![true],&["ok"],true);
                         }
-                        println!();
                     },
                     "time" => {
                         let time = resp[2].as_i64().unwrap();
                         let now = current_time_as_secs();
-                        println!("{}\t{}\t{}",resp[0],resp[1],now - time);
+                        resp[2] = (now - time).into();
+                        if ! self.json {
+                            println!("{}\t{}\t{}",resp[0],resp[1],resp[2]);
+                        } else {
+                            json_start("time");                            
+                            json_output(resp,&["addr","name","time diff"],false);
+                            json_output(array![true],&["ok"],true);
+                        }
                     },
                     _ => {}
                 }
@@ -288,8 +347,14 @@ impl MessageData {
             Query::Ping(instant) => {
                 // also a Get operation under the hood...
                 if ! self.quiet {
-                    let diff = duration_as_millis(instant.elapsed()) as u32;
-                    println!("{}\t{}\t{}",resp[0],resp[1],diff);
+                    let diff = duration_as_millis(instant.elapsed()) as i32;
+                    if ! self.json {
+                        println!("{}\t{}\t{}",resp[0],resp[1],diff);
+                    } else {
+                        json_start("ping");
+                        json_output(resp,&["addr","name"],false);
+                        json_output(array![diff,true],&["ping","ok"],true);
+                    }
                 }
             },
             Query::Invoke(_,_) => {
@@ -335,9 +400,16 @@ impl MessageData {
             // the group command collects group members
             // which we then persist to file
             // TODO: error checking
-            println!("group {} created:",name);
-            for (k,v) in &self.group {
-                println!("{}\t{}",k,v);
+            if ! self.json {
+                println!("group {} created:",name);
+                for (k,v) in &self.group {
+                    println!("{}\t{}",k,v);
+                }
+            } else {
+                for (k,v) in &self.group {
+                    json_start("group");
+                    json_output(array![k.as_str(),v.as_str(),name.as_str(),true],&["addr","name","group","ok"],true);
+                }
             }
             let jg = to_jobject(&self.group);
             { // NLL !
@@ -364,7 +436,12 @@ impl MessageData {
             }
             for (id,name) in group {
                 if ! responses.contains_key(id) {
-                    error!("error: {} {} failed to respond", id, name);
+                    if ! self.json {
+                        error!("error: {} {} failed to respond", id, name);
+                    } else {
+                        json_start(&self.current_command().command);
+                        json_output(array![id.as_str(),name.as_str(),false,"failed to respond"],&["addr","name","ok","error"],true);
+                    }
                     ok = false;
                 }
             }
@@ -440,7 +517,7 @@ fn run() -> BoxResult<bool> {
     let query = flags.construct_query_alias(command_aliases, &commands, restricted)?;
 
     // message data is managed by mosquitto on_message handler
-    let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet);
+    let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet,flags.json,commands);
     message_data.all_group = match store.values.get("groups") {
         Some(groups) => {
             groups["all"].clone()
@@ -498,9 +575,14 @@ fn run() -> BoxResult<bool> {
             let mut seq = 0;
             let (id,success,resp) = MessageData::parse_response(msg.text(),&mut seq);
             if ! success {
-                eprintln!("error for {} seq {}: {}", id,seq,resp);
-                error!("seq {} addr {} resp {}", seq,id,resp);
-                data.response(id,false,false);
+                if ! data.json {
+                    error!("seq {} addr {} resp {}", seq,id,resp);
+                } else {
+                    let name = data.lookup_name(&id);
+                    json_start(&data.current_command().command);                    
+                    json_output(array![id.as_str(),name,false,resp],&["addr","name","ok","error"],true);
+                }
+                data.response(id,false,true);
                 return;
             } else {
                 if data.verbose {
@@ -508,8 +590,6 @@ fn run() -> BoxResult<bool> {
                 }
                 info!("seq {} addr {} resp {}", seq,id,resp);
                 if seq != data.seq {
-                    eprintln!("late arrival {}: seq {} != {}",id,seq,data.seq);
-                    // TODO arrange log config so that errors always echoed to stderr
                     error!("late arrival {}: seq {} != {}",id,seq,data.seq);
                 } else {
                     data.handle_response(id,resp);
@@ -536,8 +616,7 @@ fn run() -> BoxResult<bool> {
         if msg.topic().starts_with(PROCESS_FETCH_TOPIC) {
             let parms = &(msg.topic())[PROCESS_FETCH_TOPIC.len()..];
             let mut id = String::new();
-            if let Err(e) = data.handle_fetch(parms,msg.payload(),&mut id) {
-                eprintln!("pull error: {}",e);
+            if let Err(e) = data.handle_fetch(parms,msg.payload(),&mut id) {                
                 error!("pull error: {}",e);
                 process::exit(1);
             }
