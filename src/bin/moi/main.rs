@@ -171,9 +171,8 @@ impl MessageData {
     fn response(&mut self, id: String, ok: bool, handled: bool) {
         if ! ok && ! handled {
             let name = self.lookup_name(&id);
-            if ! self.json {
-                error!("{} {} failed",id,name);
-            } else {
+            error!("{} {} failed",id,name);
+            if self.json {
                 json_start(&self.current_command().command);
                 json_output(array![id.as_str(),name.as_str(),false,"failed"],&["addr","name","ok","error"],true);
             }
@@ -436,9 +435,8 @@ impl MessageData {
             }
             for (id,name) in group {
                 if ! responses.contains_key(id) {
-                    if ! self.json {
-                        error!("error: {} {} failed to respond", id, name);
-                    } else {
+                    error!("error: {} {} failed to respond", id, name);
+                    if self.json {
                         json_start(&self.current_command().command);
                         json_output(array![id.as_str(),name.as_str(),false,"failed to respond"],&["addr","name","ok","error"],true);
                     }
@@ -474,7 +472,7 @@ fn run() -> BoxResult<bool> {
     };
     // we DON'T log non-su moi invocations if there's a su install
     let log_file = if flags.sharing_with_su { None } else { Some(path.as_path()) };
-    logging::init(log_file,gets_or(config,"log_level","info")?)?;
+    logging::init(log_file,gets_or(config,"log_level","info")?,! flags.json)?;
 
     let json_store = match gets_opt(config,"store")? {
         Some(s) => PathBuf::from(s),
@@ -575,9 +573,8 @@ fn run() -> BoxResult<bool> {
             let mut seq = 0;
             let (id,success,resp) = MessageData::parse_response(msg.text(),&mut seq);
             if ! success {
-                if ! data.json {
-                    error!("seq {} addr {} resp {}", seq,id,resp);
-                } else {
+                error!("seq {} addr {} resp {}", seq,id,resp);
+                if data.json {
                     let name = data.lookup_name(&id);
                     json_start(&data.current_command().command);                    
                     json_output(array![id.as_str(),name,false,resp],&["addr","name","ok","error"],true);

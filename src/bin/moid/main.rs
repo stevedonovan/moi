@@ -375,7 +375,8 @@ fn logging_init(cfg: &toml::Value, def: &str) -> BoxResult<()> {
     }
     logging::init(
         Some(&path),
-        gets_or(cfg,"log_level","info")?
+        gets_or(cfg,"log_level","info")?,
+        false
     )?;
     Ok(())
 }
