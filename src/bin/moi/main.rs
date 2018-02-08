@@ -24,7 +24,7 @@ use query::*;
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
-use ansi_term::Colour::{Red,Yellow};
+use ansi_term::Colour::{Red,Yellow,White};
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -57,9 +57,9 @@ pub fn json_out(cmd: &str, ok: bool, addr: &str, name: &str, j: JsonValue, cols:
             };
             res.push_str(&format!("{:?}:{}",col,es));
             res.push(',');
-        }    
+        }
         res.pop();
-        res.push('}');    
+        res.push('}');
         println!("{}",res);
     } else {
         println!("}}");
@@ -85,7 +85,7 @@ struct MessageData {
     quiet: bool,
     json: bool,
     no_groups: Cell<bool>
-   
+
 }
 
 impl MessageData {
@@ -198,7 +198,7 @@ impl MessageData {
     fn current_query(&self) -> &Query {
         &self.query[self.seq as usize]
     }
-    
+
     fn current_command(&self) -> &flags::CommandArgs {
         &self.commands[self.seq as usize]
     }
@@ -263,26 +263,26 @@ impl MessageData {
         if ! self.json {
             let multiline = output.find('\n').is_some();
             let (delim,post) = if multiline {(":\n","\n")} else {("\t","")};
-            
+            let idc = White.bold().paint(id);
+            let namec = White.bold().paint(name);
             if code == 0 {
                 if ! self.quiet {
-                    println!("{}\t{}{}{}{}",id,name,delim,output,post);
+                    println!("{}\t{}{}{}{}",idc,namec,delim,output,post);
                 }
                 true
             } else {
-                println!("{}\t{}{}(code {}): {}{}",id,name,delim,code,output,post);
+                println!("{}\t{}{}(code {}): {}{}",idc,namec,delim,Red.bold().paint(code.to_string()),output,post);
                 // important: failed remote commands must count as failures
                 false
             }
         } else {
             json_out("run",code==0,&id,&name,array![code,output],&["code","output"]);
-            //json_output(,true);
             code == 0
         }
     }
 
     // comes in as MOI/fetch/{seq}/{addr}/{name}
-    fn handle_fetch(&self, parms: &str, payload: &[u8], id: &mut String) -> BoxResult<()> {
+    fn handle_fetch(&self, parms: &str, payload: &[u8], id: &mut String) -> BoxResult<String> {
         let mut iter = parms.split('/');
         let seq: u8 = iter.next().unwrap().parse()?;
         let addr = iter.next().unwrap();
@@ -298,10 +298,10 @@ impl MessageData {
         if let Ok(dest) = strutil::replace_percent_destination(ff.local_dest.to_str().unwrap(),addr,name) {
             let mut f = fs::File::create(&dest)?;
             f.write_all(payload)?;
+            return Ok(dest);
         } else {
             return err_io(&format!("local dest substitution failed {}",ff.local_dest.display()));
         }
-        Ok(())
     }
 
 
@@ -340,7 +340,6 @@ impl MessageData {
                             println!("{}\t{}\t{}",resp[0],resp[1],diff);
                         } else {
                             json_out("time",true,as_str_always(&resp[0]),as_str_always(&resp[1]),array![diff],&["time diff"]);
-                            //json_output(,true);
                         }
                     },
                     _ => {}
@@ -354,7 +353,6 @@ impl MessageData {
                         println!("{}\t{}\t{}",resp[0],resp[1],diff);
                     } else {
                         json_out("ping",true,as_str_always(&resp[0]),as_str_always(&resp[1]),array![diff],&["ping"]);
-                        //
                     }
                 }
             },
@@ -398,7 +396,7 @@ impl MessageData {
 
     fn finish_off(&mut self, store: &mut Config) -> BoxResult<bool> {
         if self.no_groups.get() {
-            warn!("no groups defined yet");
+            warn!("no all group yet for name lookup: say 'moi group all'");
         }
         Ok(if let Query::Group(ref name, _) = *self.current_query() {
             // the group command collects group members
@@ -412,7 +410,6 @@ impl MessageData {
             } else {
                 for (k,v) in &self.group {
                     json_out("group",true,k,v,array![name.as_str()],&["group"]);
-                    //json_output(,true);
                 }
             }
             let jg = to_jobject(&self.group);
@@ -443,7 +440,6 @@ impl MessageData {
                     error!("error: {} {} failed to respond", id, name);
                     if self.json {
                         json_out(&self.current_command().command,false,id,name,array!["failed to respond"],&["error"]);
-                        //
                     }
                     ok = false;
                 }
@@ -486,7 +482,7 @@ fn run() -> BoxResult<bool> {
             }  else
             if record.level() == log::Level::Warn {
                println!("{}",Yellow.bold().paint(text));
-            }  
+            }
         }
     })?;
 
@@ -588,11 +584,10 @@ fn run() -> BoxResult<bool> {
             let mut seq = 0;
             let (id,success,resp) = MessageData::parse_response(msg.text(),&mut seq);
             if ! success {
-                error!("seq {} addr {} resp {}", seq,id,resp);
+                let name = data.lookup_name(&id);
+                error!("{}\t{}\t{}", id,name,resp);
                 if data.json {
-                    let name = data.lookup_name(&id);
                     json_out(&data.current_command().command,false,&id,&name,array![resp],&["error"]);
-                    //json_output(,true);
                 }
                 data.response(id,false,true);
                 return;
@@ -602,7 +597,7 @@ fn run() -> BoxResult<bool> {
                 }
                 info!("seq {} addr {} resp {}", seq,id,resp);
                 if seq != data.seq {
-                    error!("late arrival {}: seq {} != {}",id,seq,data.seq);
+                    error!("late arrival {} {}: seq {} != {}",id,data.lookup_name(&id),seq,data.seq);
                 } else {
                     data.handle_response(id,resp);
                 }
@@ -611,6 +606,10 @@ fn run() -> BoxResult<bool> {
         if file_resp.matches(&msg) {
             let mut seq = 0;
             let (id,ok,_) = MessageData::parse_response(msg.text(),&mut seq);
+            if data.json && ok {
+                let file = data.current_command().arguments[0].as_str();
+                json_out("push",true,&id,&data.lookup_name(&id),array![file],&["file"]);
+            }
             data.response(id,ok,false);
         } else
         if process_resp.matches(&msg) {
@@ -628,9 +627,17 @@ fn run() -> BoxResult<bool> {
         if msg.topic().starts_with(PROCESS_FETCH_TOPIC) {
             let parms = &(msg.topic())[PROCESS_FETCH_TOPIC.len()..];
             let mut id = String::new();
-            if let Err(e) = data.handle_fetch(parms,msg.payload(),&mut id) {                
-                error!("pull error: {}",e);
-                process::exit(1);
+            match data.handle_fetch(parms,msg.payload(),&mut id) {
+                Err(e) => {
+                    error!("pull error {} {}", id,e);
+                },
+                Ok(dest) => {
+                    if data.json {
+                        let file = data.current_command().arguments[0].as_str();
+                        json_out("pull",true,&id,&data.lookup_name(&id),
+                            array![file,dest.as_str()],&["remote","local"]);
+                    }
+                }
             }
             data.response(id,true,false);
         }
