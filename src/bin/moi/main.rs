@@ -41,30 +41,28 @@ const FILE_TOPIC_PREFIX: &str = "MOI/file";
 const TIMEOUT_TOPIC: &str = "MOI/pvt/timeout";
 const PROCESS_FETCH_TOPIC: &str = "MOI/fetch/";
 
-pub fn json_start(cmd: &str) {
-    print!("{{\"cmd\":{:?},",cmd);
-}
-
-pub fn json_output(j: JsonValue, cols: &[&str], finish: bool) {
-    let mut res = String::new();
-    for (e,col) in j.members().zip(cols) {
-        let es = e.to_string();
-        let es = if e.is_string() {
-            format!("{:?}",es)
-        } else {
-            es
-        };
-        res.push_str(&format!("{:?}:{}",col,es));
-        res.push(',');
-    }    
-    if finish {
+pub fn json_out(cmd: &str, ok: bool, addr: &str, name: &str, j: JsonValue, cols: &[&str]) {
+    print!("{{\"cmd\":{:?},\"ok\":{},\"addr\":{:?},\"name\":{:?}",cmd, ok, addr, name);
+    if cols.len() > 0 {
+        let mut res = String::from(",");
+        for (e,col) in j.members().zip(cols) {
+            let es = e.to_string();
+            let es = if e.is_string() {
+                format!("{:?}",es)
+            } else {
+                es
+            };
+            res.push_str(&format!("{:?}:{}",col,es));
+            res.push(',');
+        }    
         res.pop();
         res.push('}');    
         println!("{}",res);
     } else {
-        print!("{}",res);
+        println!("}}");
     }
 }
+
 
 struct MessageData {
     m: Mosquitto,
@@ -173,8 +171,7 @@ impl MessageData {
             let name = self.lookup_name(&id);
             error!("{} {} failed",id,name);
             if self.json {
-                json_start(&self.current_command().command);
-                json_output(array![id.as_str(),name.as_str(),false,"failed"],&["addr","name","ok","error"],true);
+                json_out(&self.current_command().command,false,&id,&name,array!["failed"],&["error"]);
             }
         }
         if self.verbose {
@@ -272,8 +269,8 @@ impl MessageData {
                 false
             }
         } else {
-            json_start("run");
-            json_output(array![id,name,code==0,code,output],&["addr","name","ok","code","output"],true);
+            json_out("run",code==0,&id,&name,array![code,output],&["code","output"]);
+            //json_output(,true);
             code == 0
         }
     }
@@ -322,22 +319,22 @@ impl MessageData {
                             }
                             println!();
                         } else {
-                            let cols: Vec<_> = cols.iter().map(|s| s.as_str()).collect();
-                            json_start("ls");
-                            json_output(resp,&cols,false);
-                            json_output(array![true],&["ok"],true);
+                            // the result is _guaranteed_ to contain at least the address and the name
+                            let addr = resp.array_remove(0);
+                            let name = resp.array_remove(0);
+                            let cols: Vec<_> = cols.iter().skip(2).map(|s| s.as_str()).collect();
+                            json_out("ls",true,as_str_always(&addr),as_str_always(&name),resp,&cols);
                         }
                     },
                     "time" => {
                         let time = resp[2].as_i64().unwrap();
                         let now = current_time_as_secs();
-                        resp[2] = (now - time).into();
+                        let diff = now - time;
                         if ! self.json {
-                            println!("{}\t{}\t{}",resp[0],resp[1],resp[2]);
+                            println!("{}\t{}\t{}",resp[0],resp[1],diff);
                         } else {
-                            json_start("time");                            
-                            json_output(resp,&["addr","name","time diff"],false);
-                            json_output(array![true],&["ok"],true);
+                            json_out("time",true,as_str_always(&resp[0]),as_str_always(&resp[1]),array![diff],&["time diff"]);
+                            //json_output(,true);
                         }
                     },
                     _ => {}
@@ -350,9 +347,8 @@ impl MessageData {
                     if ! self.json {
                         println!("{}\t{}\t{}",resp[0],resp[1],diff);
                     } else {
-                        json_start("ping");
-                        json_output(resp,&["addr","name"],false);
-                        json_output(array![diff,true],&["ping","ok"],true);
+                        json_out("ping",true,as_str_always(&resp[0]),as_str_always(&resp[1]),array![diff],&["ping"]);
+                        //
                     }
                 }
             },
@@ -406,8 +402,8 @@ impl MessageData {
                 }
             } else {
                 for (k,v) in &self.group {
-                    json_start("group");
-                    json_output(array![k.as_str(),v.as_str(),name.as_str(),true],&["addr","name","group","ok"],true);
+                    json_out("group",true,k,v,array![name.as_str()],&["group"]);
+                    //json_output(,true);
                 }
             }
             let jg = to_jobject(&self.group);
@@ -437,8 +433,8 @@ impl MessageData {
                 if ! responses.contains_key(id) {
                     error!("error: {} {} failed to respond", id, name);
                     if self.json {
-                        json_start(&self.current_command().command);
-                        json_output(array![id.as_str(),name.as_str(),false,"failed to respond"],&["addr","name","ok","error"],true);
+                        json_out(&self.current_command().command,false,id,name,array!["failed to respond"],&["error"]);
+                        //
                     }
                     ok = false;
                 }
@@ -576,8 +572,8 @@ fn run() -> BoxResult<bool> {
                 error!("seq {} addr {} resp {}", seq,id,resp);
                 if data.json {
                     let name = data.lookup_name(&id);
-                    json_start(&data.current_command().command);                    
-                    json_output(array![id.as_str(),name,false,resp],&["addr","name","ok","error"],true);
+                    json_out(&data.current_command().command,false,&id,&name,array![resp],&["error"]);
+                    //json_output(,true);
                 }
                 data.response(id,false,true);
                 return;

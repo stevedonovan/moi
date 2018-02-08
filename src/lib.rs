@@ -195,6 +195,10 @@ pub fn as_str(v: &JsonValue) -> io::Result<&str> {
     v.as_str().or_then_err(|| format!("value {} not a string",v))
 }
 
+pub fn as_str_always(v: &JsonValue) -> &str {
+    as_str(v).unwrap()
+}
+
 pub fn array_of_strings(v: &JsonValue) -> io::Result<Vec<&str>> {
     v.members().map(|s| as_str(s)).collect()
 }
