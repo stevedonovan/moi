@@ -5,6 +5,7 @@ extern crate lapp;
 extern crate toml;
 extern crate md5;
 extern crate libc;
+extern crate ansi_term;
 #[macro_use] extern crate log;
 // our own common crate (shared with daemon)
 #[macro_use]
@@ -23,6 +24,7 @@ use query::*;
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
+use ansi_term::Colour::{Red,Yellow};
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -30,6 +32,7 @@ use std::collections::HashMap;
 use std::{fs,io,thread,process};
 use std::io::prelude::*;
 use std::error::Error;
+use std::cell::Cell;
 
 const LAUNCH_TIMEOUT:i32 = 20000;
 
@@ -81,6 +84,7 @@ struct MessageData {
     verbose: bool,
     quiet: bool,
     json: bool,
+    no_groups: Cell<bool>
    
 }
 
@@ -102,6 +106,7 @@ impl MessageData {
             verbose: verbose,
             quiet: quiet,
             json: json,
+            no_groups: Cell::new(false),
         }
     }
 
@@ -112,6 +117,7 @@ impl MessageData {
             if res == &JsonValue::Null { return "<unknown>".into(); }
             res.to_string()
         } else {
+            self.no_groups.set(true);
             "<unknown>".into()
         }
     }
@@ -391,6 +397,9 @@ impl MessageData {
     }
 
     fn finish_off(&mut self, store: &mut Config) -> BoxResult<bool> {
+        if self.no_groups.get() {
+            warn!("no groups defined yet");
+        }
         Ok(if let Query::Group(ref name, _) = *self.current_query() {
             // the group command collects group members
             // which we then persist to file
@@ -468,7 +477,18 @@ fn run() -> BoxResult<bool> {
     };
     // we DON'T log non-su moi invocations if there's a su install
     let log_file = if flags.sharing_with_su { None } else { Some(path.as_path()) };
-    logging::init(log_file,gets_or(config,"log_level","info")?,! flags.json)?;
+    let echo_console = ! flags.json;
+    logging::init(log_file,gets_or(config,"log_level","info")?,move |record| {
+        if echo_console {
+            let text = format!("{}",record.args());
+            if record.level() == log::Level::Error {
+                eprintln!("{}",Red.bold().paint(text));
+            }  else
+            if record.level() == log::Level::Warn {
+               println!("{}",Yellow.bold().paint(text));
+            }  
+        }
+    })?;
 
     let json_store = match gets_opt(config,"store")? {
         Some(s) => PathBuf::from(s),
@@ -555,7 +575,6 @@ fn run() -> BoxResult<bool> {
 
     let launching = message_data.query.iter().any(|q| q.is_wait());
     if launching && message_data.maybe_group.is_none() {
-        println!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
         warn!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
     }
 
@@ -674,7 +693,8 @@ fn main() {
             }
         },
         Err(e) => {
-            eprintln!("error: {}",e);
+            let text = format!("error: {}",e);
+            eprintln!("{}",Red.bold().paint(text));
         }
     }
 }

@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::os::unix::fs::DirBuilderExt;
 use io::prelude::*;
 
+use ansi_term::Colour::Yellow;
+
 const VERSION: &str = "0.1.6";
 
 const USAGE: &str = "
@@ -108,12 +110,14 @@ impl Flags {
             let mut f = fs::File::create(&default_config)?;
             write!(f,"[config]\nmqtt_addr = \"localhost\"\n")?;
             write!(f,"restricted = \"{}\"\n",if root {"yes"} else {"no"})?;
-            write_all(&json_store,"{}\n")?;
-            println!("Creating {}.\nEdit mqtt_addr and restricted if necessary",default_config.display());
+            write_all(&json_store,"{}\n")?;            
+            let text = format!("Creating {}.\nEdit mqtt_addr and restricted if necessary",default_config.display());
+            println!("{}",Yellow.bold().paint(text));
             if root {
                 let certs = moi_dir.join("certs");
                 fs::DirBuilder::new().mode(0o700).create(&certs)?;
-                println!("Default certificate dir {} created",certs.display());
+                let text = format!("Default certificate dir {} created",certs.display());
+                println!("{}",Yellow.bold().paint(text));
             }
         }
 
