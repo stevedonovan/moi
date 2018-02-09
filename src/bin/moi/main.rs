@@ -308,17 +308,23 @@ impl MessageData {
     fn handle_response(&mut self, id: String, mut resp: JsonValue) {
         let mut ok = Some(true);
         let mut handled = false;
+        let bold = White.bold();
+        let boldj = |j: &JsonValue| bold.paint(j.to_string());
         // need a split borrow here, hence repeated code
         match self.query[self.seq as usize] {
             Query::Get(ref cols, ref command) => {
                 match command.as_str() {
                     "ls" =>  {
                         if ! self.json {
-                            // Ugly. It will get Better...
+                            // Ugly. It will get Better...                            
                             let n = resp.len();
                             for idx in 0..n {
                                 let r = &resp[idx];
-                                print!("{}",r);
+                                if idx < 2 {
+                                    print!("{}",boldj(r));
+                                } else {
+                                    print!("{}",r);
+                                }
                                 if idx < n-1 {
                                     print!("\t");
                                 }
@@ -333,13 +339,15 @@ impl MessageData {
                         }
                     },
                     "time" => {
+                        let id = &resp[0];
+                        let name = &resp[1];
                         let time = resp[2].as_i64().unwrap();
                         let now = current_time_as_secs();
                         let diff = now - time;
                         if ! self.json {
-                            println!("{}\t{}\t{}",resp[0],resp[1],diff);
+                            println!("{}\t{}\t{}",boldj(id),boldj(name),diff);
                         } else {
-                            json_out("time",true,as_str_always(&resp[0]),as_str_always(&resp[1]),array![diff],&["time diff"]);
+                            json_out("time",true,as_str_always(id),as_str_always(name),array![diff],&["time diff"]);
                         }
                     },
                     _ => {}
@@ -348,11 +356,13 @@ impl MessageData {
             Query::Ping(instant) => {
                 // also a Get operation under the hood...
                 if ! self.quiet {
+                    let id = &resp[0];
+                    let name = &resp[1];                    
                     let diff = duration_as_millis(instant.elapsed()) as i32;
                     if ! self.json {
-                        println!("{}\t{}\t{}",resp[0],resp[1],diff);
+                        println!("{}\t{}\t{}",boldj(id),boldj(name),diff);
                     } else {
-                        json_out("ping",true,as_str_always(&resp[0]),as_str_always(&resp[1]),array![diff],&["ping"]);
+                        json_out("ping",true,as_str_always(id),as_str_always(name),array![diff],&["ping"]);
                     }
                 }
             },
@@ -396,16 +406,17 @@ impl MessageData {
 
     fn finish_off(&mut self, store: &mut Config) -> BoxResult<bool> {
         if self.no_groups.get() {
-            warn!("no all group yet for name lookup: say 'moi group all'");
+            warn!("all group not defined yet: say 'moi group all'");
         }
         Ok(if let Query::Group(ref name, _) = *self.current_query() {
             // the group command collects group members
             // which we then persist to file
             // TODO: error checking
             if ! self.json {
-                println!("group {} created:",name);
+                let bold = White.bold();
+                warn!("group {} created:",name);
                 for (k,v) in &self.group {
-                    println!("{}\t{}",k,v);
+                    println!("{}\t{}",bold.paint(k.as_str()),bold.paint(v.as_str()));
                 }
             } else {
                 for (k,v) in &self.group {
