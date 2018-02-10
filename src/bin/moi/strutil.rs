@@ -69,9 +69,18 @@ pub fn replace_percent_destination(text: &str, addr: &str, name: &str) -> BoxRes
     })
 }
 
+fn basename(arg: &str) -> &str {
+    if let Some(pos) = arg.rfind('/') {
+        (&arg[pos+1..])
+    } else {
+        arg
+    }
+}
+
 // we split at _ or - when followed by a digit...
 fn split_version(name: &str) -> Option<(&str,&str)> {
     let mut p = 0;
+    let name = basename(name);
     while let Some(pos) = (&name[p..]).find(|c:char| c=='-' || c=='_') {
         let condn = (&name[p+pos+1..]).chars().next().unwrap().is_digit(10);
         if condn  {
@@ -97,7 +106,7 @@ pub fn replace_dollar_args(text: &str, args: &[String]) -> BoxResult<String> {
                 if let Some((name,_)) = split_version(&arg) {
                     let massaged = massage_valid_key(name);
                     if massaged != name {
-                        println!("warning: package '{}' replaced with valid key '{}",name,massaged);
+                        warn!("warning: package '{}' replaced with valid key '{}'",name,massaged);
                     }
                     return Ok(massaged);
                 }
@@ -110,11 +119,7 @@ pub fn replace_dollar_args(text: &str, args: &[String]) -> BoxResult<String> {
                 });
             } else
             if kind == "base" {
-                return Ok(if let Some(pos) = arg.rfind('/') {
-                    (&arg[pos+1..]).into()
-                } else {
-                    arg.into()
-                });
+                return Ok(basename(&arg).into())
             } else {
                 return err_io(&format!("substitution invalid kind {}",kind));
             }

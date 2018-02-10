@@ -318,13 +318,19 @@ impl Flags {
     }
 
     fn query_alias_collect(&mut self, t: &toml::Value, config: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>, restricted: bool) -> BoxResult<()> {
-        // either the filter or the group can be overriden, but currently only in the first command
+        // the filter and/or the group can be overriden, but currently only in the first command
         // of a sequence
         if let Some(filter) = gets_opt(t,"filter")? {
-            self.filter_desc = filter.into();
-        } else
+            self.filter_desc = strutil::replace_dollar_args(filter,&cmd.arguments)?;
+            if self.verbose {
+                println!("alias set filter {}",self.filter_desc);
+            }
+        }
         if let Some(group) = gets_opt(t,"group")? {
             self.group_name = group.into();
+            if self.verbose {
+                println!("alias set group {}",self.group_name);
+            }
         }
         if let Some(_) = t.get("quiet") {
             self.quiet = true;
