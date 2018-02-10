@@ -15,6 +15,15 @@ devices are Unix-like. We can always lean on a minimal POSIX environment
 in the remotes, and use shell to do the actual work rather than some
 dialect of YAML.
 
+`moi` provides the following operations:
+
+  - _setting_ and _getting_ key-value pairs on remotes
+  - _running_ commands remotely
+  - _pushing_ and _pulling_ files
+
+In addition, these operations can be _filtered_ based on remote
+key values.
+
 ## No Server (except for broker) just Client
 
 For demonstration purposes, there's a set of JSON config files in the
@@ -316,7 +325,7 @@ We had an example of running a more elaborate remote command, and
 simplifying the problem with pushing and executing a shell script.
 
 There is another alternative. If `moi` is given a command `foo`, then it will
-look for `foo.toml` in current directory, and then `~/moi/foo.toml`.
+look for `foo.toml` in current directory, and then `~/.local/moi/foo.toml`.
 The structure of that TOML file is straightforward - you must provide
 the command name, and an array of arguments. Can also specify a filter
 with either `filter` or `group`.
@@ -324,23 +333,32 @@ with either `filter` or `group`.
 ```
 scratch$ cat space.toml
 command = "run"
-args = ["df -h / | awk '{getline; print $4}'"]
+args = ["df -h / | awk '{getline; print $$4}'"]
 filter = "name=jessie"
 
 scratch$ moi space
 192.168.0.13	jessie	18G
-scratch$ mv space.toml ~/.moi
+scratch$ mv space.toml ~/.local/moi
 scratch$ moi space
 192.168.0.13	jessie	18G
 ```
-Alternatively, you can edit `~/.moi/config.toml` and add the following
+Please note the `$$` which is needed to escape `$`, which is
+used for expanding arguments.
+
+`~/.local/moi` is a better location
+since custom commands then have a fixed location. But there
+is also a  difference - in a restricted environment, the location is
+usually `/usr/local/etc/moi`. Aliases may _only_ run restricted
+commmands if the alias is defined in this location.
+
+Alternatively, you can edit `~/.local/moi/config.toml` and add the following
 section - `help` is usually a good idea as well!
 
 ```toml
 [commands.space]
 help="how much room has Jessie?"
 command = "run"
-args = ["df -h / | awk '{getline; print $4}'"]
+args = ["df -h / | awk '{getline; print $$4}'"]
 filter = "name=jessie"
 ```
 It's a matter of taste and convenience whether it's a standalone alias,
@@ -355,7 +373,7 @@ scratch$ moi -f name=jessie push-run space tmp './space'
 Any arguments to the custom command can be substituted using usual `$` notation.
 
 ```
-scratch$ tail -n4 ~/.moi/config.toml
+scratch$ tail -n4 ~/.local/moi/config.toml
 [commands.pushr]
 help = "push and run a script"
 command = "push-run"
@@ -373,11 +391,11 @@ stages = 4
 
 [1]
 command = "push"
-args = ["%1","tmp"]
+args = ["$1","tmp"]
 
 [2]
 command = "launch"
-args = ["dpkg -i %1","tmp"]
+args = ["dpkg -i $1","tmp"]
 
 [3]
 command = "wait"
@@ -413,8 +431,9 @@ scratch$ jessie ls tree
 192.168.0.13	jessie	1.7.0-3_i386.deb
 ```
 
-So, the use of giving "help" is that the error messages are a bit nicer. (It _would_
-be cool to have a `moi` command which gives help for all extension commands available.)
+So, the use of giving "help" is that the error messages are a bit nicer.
+
+`moi commands` will show you all available aliases.
 
 ## Running on Devices
 

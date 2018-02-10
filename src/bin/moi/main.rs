@@ -38,6 +38,7 @@ const LAUNCH_TIMEOUT:i32 = 20000;
 
 const QUERY_TOPIC: &str = "MOI/query";
 const QUERY_FILE_RESULT_TOPIC: &str = "MOI/result/query";
+const QUERY_GROUP_RESULT_TOPIC: &str = "MOI/result/group";
 const FILE_RESULT_TOPIC: &str = "MOI/result/file";
 const PROCESS_RESULT_TOPIC: &str = "MOI/result/process";
 const FILE_TOPIC_PREFIX: &str = "MOI/file";
@@ -151,7 +152,8 @@ impl MessageData {
         self.maybe_group = Some(name.into());
     }
 
-    // this is an operation on a single device
+    // this is an operation on a single device,
+    // treated as a Group of One
     fn set_single_id(&mut self, addr: &str, was_addr: bool) -> BoxResult<()> {
         let addr = addr.to_string();
         let (addr,name) = if was_addr {
@@ -243,6 +245,7 @@ impl MessageData {
             "seq" => self.seq,
             "which" => self.filter.to_json(),
             "what" => q,
+            "group" => self.maybe_group.is_some(),
         };
         let payload = q_json.to_string();
         if self.verbose {
@@ -529,6 +532,7 @@ fn run() -> BoxResult<bool> {
     let m = mosquitto_setup("moi",&config,&toml,flags.moi_dir.join("certs"))?;
 
     let query_resp = m.subscribe(QUERY_FILE_RESULT_TOPIC,1)?;
+    let group_resp = m.subscribe(QUERY_GROUP_RESULT_TOPIC,1)?;
     let file_resp = m.subscribe(FILE_RESULT_TOPIC,1)?;
     let pvt_timeout = m.subscribe(TIMEOUT_TOPIC,1)?;
     m.subscribe(&(PROCESS_FETCH_TOPIC.to_string() + "#"),1)?;
@@ -661,6 +665,11 @@ fn run() -> BoxResult<bool> {
                 }
             }
             data.response(id,true,false);
+        } else
+        if group_resp.matches(&msg) {
+            // group operations always notify us back
+            let id = msg.text();
+            data.response(id.into(),true,false);
         }
 
         if data.group_finished() || pvt_timeout.matches(&msg) {

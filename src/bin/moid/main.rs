@@ -33,6 +33,7 @@ use std::error::Error;
 const QUERY_TOPIC: &str = "MOI/query";
 const QUIT_TOPIC: &str = "MOI/quit";
 const ALIVE_TOPIC: &str = "MOI/alive";
+const GROUP_OP: &str = "__GROUP_OP__";
 
 struct MsgData {
     cfg: SharedPtr<Config>,
@@ -330,7 +331,14 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
         // is this query intended for us?
         let yes = match_condition(&lock!(mdata.cfg),how,condn)?;
         if ! yes { // not for us!
-            return Ok(JsonValue::Null);
+            // NB for _group operations_ that we make some response
+            let group_op = if let Some(is_group) = maybe_field(&query,"group") {
+                let yesno = is_group.as_bool().or_err("group field must be boolean")?;
+                yesno
+            } else {
+                false
+            };
+            return Ok(if group_op {JsonValue::String(GROUP_OP.into())} else {JsonValue::Null});
         }
         info!("condition {} {}",how,condn);
     }
@@ -495,6 +503,19 @@ fn run() -> BoxResult<()> {
         if query.matches(&msg) || query_me.matches(&msg) {
             let res = match handle_query(mdata,msg.text()) {
                 Ok(v) =>  {
+                    if v == JsonValue::Null {
+                        // only tell mother about queries intended for us
+                        return;
+                    }
+                    // Except if it's a group operation - reassure mother
+                    // that we're still present
+                    if let Some(s) = v.as_str() {
+                        if s == GROUP_OP {
+                            let cfg = lock!(mdata.cfg);
+                            m.publish("MOI/result/group",cfg.addr().as_bytes(),1,false).unwrap();
+                            return;
+                        }
+                    }
                     info!("seq {} resp {}",mdata.seq,v);
                     mdata.ok_result(v)
                 },
@@ -503,36 +524,35 @@ fn run() -> BoxResult<()> {
                     mdata.error_result(e.description())
                 }
             };
-            if res != JsonValue::Null { // only tell mother about queries intended for us
-                if let Some(ref _pending_file) = lock!(mdata.cfg).pending_file {
-                    let topic = &format!("MOI/file/{}",mdata.seq);
-                    info!("pending {} seq {}",topic,mdata.seq);
-                    m.subscribe(&topic,1).unwrap();
+            // file being pushed - let's now listen for the contents
+            if let Some(ref _pending_file) = lock!(mdata.cfg).pending_file {
+                let topic = &format!("MOI/file/{}",mdata.seq);
+                info!("pending {} seq {}",topic,mdata.seq);
+                m.subscribe(&topic,1).unwrap();
+            }
+            // the response to "fetch" is a special snowflake
+            // successful response is just the bytes of the file
+            let file_fetching = if let Some(ref buffer) = mdata.pending_buffer {
+                let cfg = lock!(mdata.cfg);
+                let topic = format!("MOI/fetch/{}/{}/{}",
+                    mdata.seq,
+                    cfg.addr(),
+                    cfg.name()
+                );
+                info!("{} fetched {} bytes",topic,buffer.len());
+                m.publish(&topic,buffer,1,false).unwrap();
+                true
+            } else {
+                // But GENERALLY it is in nice JSON format
+                let payload = res.to_string();
+                if let Err(e) = m.publish("MOI/result/query",payload.as_bytes(),1,false) {
+                    // TODO: RECONNECTION!
+                    error!("publish response failed {}", e);
                 }
-                // the response to "fetch" is a special snowflake
-                // successful response is just the bytes of the file
-                let file_fetching = if let Some(ref buffer) = mdata.pending_buffer {
-                    let cfg = lock!(mdata.cfg);
-                    let topic = format!("MOI/fetch/{}/{}/{}",
-                        mdata.seq,
-                        cfg.addr(),
-                        cfg.name()
-                    );
-                    info!("{} fetched {} bytes",topic,buffer.len());
-                    m.publish(&topic,buffer,1,false).unwrap();
-                    true
-                } else {
-                    // But GENERALLY it is in nice JSON format
-                    let payload = res.to_string();
-                    if let Err(e) = m.publish("MOI/result/query",payload.as_bytes(),1,false) {
-                        // TODO: RECONNECTION!
-                        error!("publish response failed {}", e);
-                    }
-                    false
-                };
-                if file_fetching {
-                    mdata.pending_buffer = None;
-                }
+                false
+            };
+            if file_fetching {
+                mdata.pending_buffer = None;
             }
         } else
         if msg.topic().starts_with("MOI/file") {
