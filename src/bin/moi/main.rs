@@ -241,12 +241,14 @@ impl MessageData {
         if q == JsonValue::Null {
             return Ok(());
         }
-        let q_json = object! {
+        let mut q_json = object! {
             "seq" => self.seq,
             "which" => self.filter.to_json(),
             "what" => q,
-            "group" => self.maybe_group.is_some(),
         };
+        if let Some(ref name) = self.maybe_group {
+            q_json["group"] = name.as_str().into();
+        }
         let payload = q_json.to_string();
         if self.verbose {
             println!("sent {}",payload);

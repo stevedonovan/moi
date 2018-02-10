@@ -333,8 +333,13 @@ fn handle_query(mdata: &mut MsgData, txt: &str) -> BoxResult<JsonValue> {
         if ! yes { // not for us!
             // NB for _group operations_ that we make some response
             let group_op = if let Some(is_group) = maybe_field(&query,"group") {
-                let yesno = is_group.as_bool().or_err("group field must be boolean")?;
-                yesno
+                let group = is_group.as_str().or_err("group field must be string")?;
+                let cfg = lock!(mdata.cfg);
+                if let Some(groups) = cfg.values.get("groups") {
+                    groups.members().any(|v| v == group)
+                } else { // no groups available
+                    false
+                }
             } else {
                 false
             };
