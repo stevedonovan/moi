@@ -10,7 +10,7 @@ extern crate libc;
 mod plugin;
 use plugin::Plugins;
 
-const VERSION: &str = "0.1.4";
+const VERSION: &str = "0.1.6";
 
 use mosquitto_client::{Mosquitto,MosqMessage};
 use json::JsonValue;

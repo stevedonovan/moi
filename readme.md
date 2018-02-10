@@ -364,6 +364,8 @@ filter = "name=jessie"
 It's a matter of taste and convenience whether it's a standalone alias,
 or inside the main config TOML.
 
+`moi commands` will show you all available aliases.
+
 Aliases can do argument substitution. The `push-run`
 pattern for running a script remotely is powerful but it involves repetitive typing:
 
@@ -387,6 +389,7 @@ It is possible to do multistage aliases, which are full-blown recipes:
 ```toml
 # deb.toml
 help = "installing Debian package"
+filter = "$(1:package).not.$(1:version)"
 stages = 4
 
 [1]
@@ -415,6 +418,9 @@ A feature of multistage commands is that commands like `launch` and `run` set th
 `rc` variable - if non-zero, subsequent commands will not run. So in this case we can
 be sure that the version is _only_ set if the install command succeeds.
 
+The filter means that remotes are only updated if they do not have the package name as a key, or the
+value of that key does not match the desired version.
+
 ```
 scratch$ alias jessie='moi -f name=jessie'
 scratch$ jessie deb
@@ -433,11 +439,28 @@ scratch$ jessie ls tree
 
 So, the use of giving "help" is that the error messages are a bit nicer.
 
-`moi commands` will show you all available aliases.
+Here's another example, using `--quiet` to suppress output when the
+command succeeds. Keys may not contain dots (because we want dot notation
+for looking up subkeys) so `moi` removes it here. (I've defined `x86`
+to be the group of my 32-bit remotes, here just 'jessie')
+
+```
+scratch$ moi -q -g x86 deb ~/Downloads/lua5.2_5.2.3-1.1_i386.deb
+warning: package 'lua5.2' replaced with valid key 'lua52'
+warning: package 'lua5.2' replaced with valid key 'lua52'
+scratch$ moi -g x86 ls lua52
+192.168.0.13	jessie	5.2.3-1.1_i386.deb
+```
+Subsequent invocations will not update the package `lua5.2` since
+the value of the `lua52` key will match.
+
+This pattern will work for any installation, `RPM`, plain `.tar.gz`,
+by replacing the command in the 'launch' step - as long as the filename
+is structured as `{package}[-_]{version}`.
 
 ## Running on Devices
 
-Although (unfortunately) dated, this upstart `moid.conf` illustrates an
+Although (unfortunately) dated, this Upstart `moid.conf` illustrates an
 important point:
 
 ```
