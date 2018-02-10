@@ -486,7 +486,6 @@ fn run() -> BoxResult<bool> {
     let (commands,mut flags) = flags::Flags::new()?;
     let toml: toml::Value = read_to_string(&flags.config_file)?.parse()?;
     let config = toml.get("config").or_err("No [config] section")?;
-    let command_aliases = toml.get("commands");
 
     let path: PathBuf = if let Some(log_file) = gets_opt(config,"log_file")? {
         log_file.into()
@@ -551,7 +550,7 @@ fn run() -> BoxResult<bool> {
     } else {
         gets_or(&config,"restricted","yes")? == "yes"
     };
-    let query = flags.construct_query_alias(command_aliases, &commands, restricted)?;
+    let query = flags.construct_query_alias(&config, &commands, restricted)?;
 
     // message data is managed by mosquitto on_message handler
     let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet,flags.json,commands);

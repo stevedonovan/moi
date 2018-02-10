@@ -315,6 +315,9 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
             res.push(handle_verb(mdata,verb,args)?)?;
         }
         Ok(res)
+    } else
+    if verb == "wait" {
+        Ok(JsonValue::Null)
     } else {
         if let Some(res) = mdata.plugins.command(verb,args) {
             Ok(res?)

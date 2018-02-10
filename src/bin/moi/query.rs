@@ -340,7 +340,7 @@ impl Query {
                 }
                 object!{"chain" => res}
             },
-            Query::Wait => JsonValue::Null,
+            Query::Wait => object!{"wait" => JsonValue::Null},
             Query::Invoke(ref op, ref kvs) => {
                 let mut res = JsonValue::new_object();
                 res[op] = to_jobject(kvs);

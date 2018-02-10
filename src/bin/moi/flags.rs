@@ -110,7 +110,7 @@ impl Flags {
             let mut f = fs::File::create(&default_config)?;
             write!(f,"[config]\nmqtt_addr = \"localhost\"\n")?;
             write!(f,"restricted = \"{}\"\n",if root {"yes"} else {"no"})?;
-            write_all(&json_store,"{}\n")?;            
+            write_all(&json_store,"{}\n")?;
             let text = format!("Creating {}.\nEdit mqtt_addr and restricted if necessary",default_config.display());
             println!("{}",Yellow.bold().paint(text));
             if root {
@@ -186,7 +186,7 @@ impl Flags {
             spec
         })
     }
-    
+
     // implement our commands as Query enum values
     fn construct_query(&mut self, cmd: &str, args: &[String], restricted: bool) -> BoxResult<Query> {
         use strutil::strings;
@@ -299,7 +299,7 @@ impl Flags {
         }
     }
 
-    fn query_alias(&mut self, def: &toml::Value, cmd: &CommandArgs, help: &str, restricted: bool) -> BoxResult<Query> {
+    fn query_alias(&mut self, def: &toml::Value, config: &toml::Value, cmd: &CommandArgs, help: &str, restricted: bool) -> BoxResult<Query> {
         // MUST have at least "command" and "args"
         let alias_command = def.get("command").or_err("alias: command must be defined")?
             .as_str().or_err("alias: command must be string")?;
@@ -313,10 +313,11 @@ impl Flags {
         if self.verbose {
             println!("alias command {} args {:?}",alias_command,alias_args);
         }
-        Ok(self.construct_query(alias_command,&alias_args,restricted)?)
+        let cmd = &[CommandArgs{command: alias_command.to_string(), arguments: alias_args}];
+        Ok(self.construct_query_alias(config,cmd,restricted)?)
     }
 
-    fn query_alias_collect(&mut self, t: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>, restricted: bool) -> BoxResult<()> {
+    fn query_alias_collect(&mut self, t: &toml::Value, config: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>, restricted: bool) -> BoxResult<()> {
         // either the filter or the group can be overriden, but currently only in the first command
         // of a sequence
         if let Some(filter) = gets_opt(t,"filter")? {
@@ -334,12 +335,12 @@ impl Flags {
         // there may be multiple stages, so sections [commands.NAME.1], [commands.NAME.2]... etc in config
         let stages = geti_or(t,"stages",0)?;
         if stages == 0 {
-            res.push(self.query_alias(t,cmd,help,restricted)?);
+            res.push(self.query_alias(t,config,cmd,help,restricted)?);
         } else {
             for i in 1..stages+1 {
                 let idx = i.to_string();
                 let sub = t.get(&idx).or_then_err(|| format!("stage {} not found",idx))?;
-                res.push(self.query_alias(sub,cmd,help,restricted)?);
+                res.push(self.query_alias(sub,config,cmd,help,restricted)?);
             }
         }
         Ok(())
@@ -347,19 +348,19 @@ impl Flags {
 
     // Program arguments passed as mutable reference, because
     // command aliases MAY modify the filter or group value
-    pub fn construct_query_alias(&mut self, aliases: Option<&toml::Value>, commands: &[CommandArgs], restricted: bool) -> BoxResult<Query> {
+    pub fn construct_query_alias(&mut self, config: &toml::Value, commands: &[CommandArgs], restricted: bool) -> BoxResult<Query> {
         let mut res = Vec::new();
         for cmd in commands.iter() {
             let mut was_alias = false;
             // there is a section [commands.NAME] in the config TOML
-            if let Some(ref lookup) = aliases {
+            if let Some(ref lookup) = config.get("commands") {
                 if let Some(t) = lookup.get(&cmd.command) { // we have an alias!
                     // these are not restricted operations
-                    self.query_alias_collect(t,cmd,&mut res,false)?;
+                    self.query_alias_collect(t,&config,cmd,&mut res,false)?;
                     was_alias = true;
                 }
             }
-            // OK, maybe the command NAME is NAME.toml or ~/.moi/NAME.toml
+            // OK, maybe the command NAME is NAME.toml or ~/.local/moi/NAME.toml
             if ! was_alias {
                 if let Some((local,toml)) = maybe_toml_config(&cmd.command,&self.moi_dir)? {
                     // local alias must respect restricted mode
@@ -368,7 +369,7 @@ impl Flags {
                     } else {
                         false
                     };
-                    self.query_alias_collect(&toml,cmd,&mut res, actual_restriction)?;
+                    self.query_alias_collect(&toml,&config,cmd,&mut res, actual_restriction)?;
                     was_alias = true;
                 }
             }
