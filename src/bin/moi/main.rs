@@ -309,21 +309,27 @@ impl MessageData {
         let mut ok = Some(true);
         let mut handled = false;
         let bold = White.bold();
-        let boldj = |j: &JsonValue| bold.paint(j.to_string());
+        let boldj = |j: &JsonValue| {
+            bold.paint(j.to_string())
+        };
         // need a split borrow here, hence repeated code
         match self.query[self.seq as usize] {
             Query::Get(ref cols, ref command) => {
                 match command.as_str() {
                     "ls" =>  {
                         if ! self.json {
-                            // Ugly. It will get Better...                            
+                            // Ugly. It will get Better...
                             let n = resp.len();
                             for idx in 0..n {
                                 let r = &resp[idx];
                                 if idx < 2 {
                                     print!("{}",boldj(r));
                                 } else {
-                                    print!("{}",r);
+                                    if r == &JsonValue::Null {
+                                        print!("{}",Red.paint("null"));
+                                    } else {
+                                        print!("{}",r);
+                                    }
                                 }
                                 if idx < n-1 {
                                     print!("\t");
@@ -357,7 +363,7 @@ impl MessageData {
                 // also a Get operation under the hood...
                 if ! self.quiet {
                     let id = &resp[0];
-                    let name = &resp[1];                    
+                    let name = &resp[1];
                     let diff = duration_as_millis(instant.elapsed()) as i32;
                     if ! self.json {
                         println!("{}\t{}\t{}",boldj(id),boldj(name),diff);
@@ -484,6 +490,7 @@ fn run() -> BoxResult<bool> {
     };
     // we DON'T log non-su moi invocations if there's a su install
     let log_file = if flags.sharing_with_su { None } else { Some(path.as_path()) };
+    // we echo errors and warnings to console with colours (unless JSON output)
     let echo_console = ! flags.json;
     logging::init(log_file,gets_or(config,"log_level","info")?,move |record| {
         if echo_console {
@@ -511,6 +518,9 @@ fn run() -> BoxResult<bool> {
             },
             "commands" => {
                 return cmds.custom_commands();
+            },
+            "install" => { // dummy command (MAY become required)
+                return Ok(true);
             },
             _ => {}
         }
@@ -563,11 +573,11 @@ fn run() -> BoxResult<bool> {
     // --group NAME works like --filter groups:NAME
     // except the results are checked against saved group information
     if flags.group_name != "none" {
-        if flags.filter_desc != "none" {
-            println!("note: ignoring --filter when --group is present");
-        }
         let jgroup = lookup_group(&store, &flags.group_name)?;
-        flags.filter_desc = format!("all groups:{} rc=0",flags.group_name);
+        // multistage group commands stop at first non-sucessful run operation
+        flags.filter_desc = format!("all groups:{} rc=0 {}",
+            flags.group_name, if flags.filter_desc != "none" {flags.filter_desc.as_str()} else {""}
+        );
         message_data.set_group(&flags.group_name,jgroup);
     }
     let filter = Condition::from_description(&flags.filter_desc);
