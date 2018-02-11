@@ -523,7 +523,7 @@ fn run() -> BoxResult<bool> {
             "commands" => {
                 return cmds.custom_commands();
             },
-            "install" => { // dummy command (MAY become required)
+            "setup" => { // dummy command (MAY become required)
                 return Ok(true);
             },
             _ => {}
@@ -677,14 +677,20 @@ fn run() -> BoxResult<bool> {
             // TOO MANY UNWRAPS!
             if data.verbose { println!("timeout seq {} {}",data.seq,data.query.len()); }
             // clear any retained file content messages
+            let mut sent_file = false;
             if let Some(ref file_topic) = data.sent_file {
+                sent_file = true;
                 m.publish(file_topic,b"",1,true).unwrap();
                 m.do_loop(50).unwrap(); // ensure it's actually published
+                if data.verbose { println!("clearing file topic {}",file_topic); }
+            }
+            if sent_file {
+                data.sent_file = None;
             }
             if data.seq as usize == data.query.len()-1 {
                 // bail out, our business is finished
                 if let Err(e) = m.disconnect() {
-                    println!("disconnect error {}",e);
+                    eprintln!("disconnect error {}",e);
                     process::exit(1);
                 }
             } else {

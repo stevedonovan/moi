@@ -1,0 +1,2 @@
+command = "launch"
+args = ["dpkg -i $(2:base)","tmp"]

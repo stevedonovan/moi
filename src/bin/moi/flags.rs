@@ -300,21 +300,28 @@ impl Flags {
     }
 
     fn query_alias(&mut self, def: &toml::Value, config: &toml::Value, cmd: &CommandArgs, help: &str, restricted: bool) -> BoxResult<Query> {
-        // MUST have at least "command" and "args"
-        let alias_command = def.get("command").or_err("alias: command must be defined")?
-            .as_str().or_err("alias: command must be string")?;
+        if let Some(alias) = def.get("alias") {
+            let alias = alias.as_str().or_err("alias: alias must be string")?;
+            let real_alias = strutil::replace_dollar_args(alias,&cmd.arguments)?;
+            let cmds = &[CommandArgs{command: real_alias, arguments: cmd.arguments.clone()}];
+            Ok(self.construct_query_alias(config,cmds,restricted)?)
+        } else {
+            // MUST have at least "command" and "args"
+            let alias_command = def.get("command").or_err("alias: command must be defined")?
+                .as_str().or_err("alias: command must be string")?;
 
-        let alias_args = toml_strings(def.get("args").or_err("alias: args must be defined")?
-            .as_array().or_err("alias: args must be array")?
-        )?;
-        let alias_args = strutil::replace_dollar_args_array(&alias_args,&cmd.arguments)
-            .map_err(|e| io_error(&format!("{} '{}' - {}",cmd.command, help, e)))?;
+            let alias_args = toml_strings(def.get("args").or_err("alias: args must be defined")?
+                .as_array().or_err("alias: args must be array")?
+            )?;
+            let alias_args = strutil::replace_dollar_args_array(&alias_args,&cmd.arguments)
+                .map_err(|e| io_error(&format!("{} '{}' - {}",cmd.command, help, e)))?;
 
-        if self.verbose {
-            println!("alias command {} args {:?}",alias_command,alias_args);
+            if self.verbose {
+                println!("alias command {} args {:?}",alias_command,alias_args);
+            }
+            let cmds = &[CommandArgs{command: alias_command.into(), arguments: alias_args}];
+            Ok(self.construct_query_alias(config,cmds,restricted)?)
         }
-        let cmd = &[CommandArgs{command: alias_command.to_string(), arguments: alias_args}];
-        Ok(self.construct_query_alias(config,cmd,restricted)?)
     }
 
     fn query_alias_collect(&mut self, t: &toml::Value, config: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>, restricted: bool) -> BoxResult<()> {

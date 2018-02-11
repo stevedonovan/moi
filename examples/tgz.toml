@@ -1,0 +1,2 @@
+command = "launch"
+args = ["tar -xzf $(2:base) -C / && test -e /install* && /install* || echo 'no install' ","tmp"]

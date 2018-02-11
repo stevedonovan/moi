@@ -434,7 +434,7 @@ Setting up tree (1.7.0-3) ...
 Processing triggers for man-db (2.7.0.2-5) ...
 
 scratch$ jessie ls tree
-192.168.0.13	jessie	1.7.0-3_i386.deb
+192.168.0.13	jessie	1.7.0-3_i386
 ```
 
 So, the use of giving "help" is that the error messages are a bit nicer.
@@ -449,7 +449,9 @@ scratch$ moi -q -g x86 deb ~/Downloads/lua5.2_5.2.3-1.1_i386.deb
 warning: package 'lua5.2' replaced with valid key 'lua52'
 warning: package 'lua5.2' replaced with valid key 'lua52'
 scratch$ moi -g x86 ls lua52
-192.168.0.13	jessie	5.2.3-1.1_i386.deb
+192.168.0.13	jessie	5.2.3-1.1_i386
+scratch$ moi -n jessie run 'lua -v'
+192.168.0.13	jessie	Lua 5.2.3  Copyright (C) 1994-2013 Lua.org, PUC-Rio
 ```
 Subsequent invocations will not update the package `lua5.2` since
 the value of the `lua52` key will match.
@@ -457,6 +459,17 @@ the value of the `lua52` key will match.
 This pattern will work for any installation, `RPM`, plain `.tar.gz`,
 by replacing the command in the 'launch' step - as long as the filename
 is structured as `{package}[-_]{version}`.
+
+`examples/install.toml` shows a generalization of this, where a general `install`
+command may have subcommands (see `examples/deb.toml` and `examples/tgz.toml`):
+
+```
+scratch$ moi -q -g x86 install deb ~/Downloads/lua5.2_5.2.3-1.1_i386.deb
+```
+
+This relies on a feature in aliases (or 'recipes' if you prefer cuter terminology)
+where `alias` may be set to an existing command in a stage. It is also $-expanded,
+like with `filter` and `args`.
 
 ## Running on Devices
 

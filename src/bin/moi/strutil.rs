@@ -77,10 +77,23 @@ fn basename(arg: &str) -> &str {
     }
 }
 
+fn filestem(arg: &str) -> &str {
+    let arg = basename(arg);
+    if let Some(pos) = arg.rfind('.') {
+        let mut stem = &arg[0..pos];
+        if stem.ends_with(".tar") {
+            stem = filestem(stem);
+        }
+        stem
+    } else {
+        arg
+    }
+}
+
 // we split at _ or - when followed by a digit...
 fn split_version(name: &str) -> Option<(&str,&str)> {
     let mut p = 0;
-    let name = basename(name);
+    let name = filestem(name);
     while let Some(pos) = (&name[p..]).find(|c:char| c=='-' || c=='_') {
         let condn = (&name[p+pos+1..]).chars().next().unwrap().is_digit(10);
         if condn  {
@@ -119,7 +132,10 @@ pub fn replace_dollar_args(text: &str, args: &[String]) -> BoxResult<String> {
                 });
             } else
             if kind == "base" {
-                return Ok(basename(&arg).into())
+                return Ok(basename(&arg).into());
+            } else
+            if kind == "stem" {
+                return Ok(filestem(&arg).into());
             } else {
                 return err_io(&format!("substitution invalid kind {}",kind));
             }
