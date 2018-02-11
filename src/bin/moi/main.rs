@@ -277,7 +277,13 @@ impl MessageData {
                 false
             }
         } else {
-            json_out("run",code==0,&id,&name,array![code,output],&["code","output"]);
+            if self.flags.cols.len() > 0 && code == 0 {
+                let columns = strings_to_json(output.split_whitespace());
+                let colnames: Vec<_> = self.flags.cols.iter().map(|s| s.as_str()).collect();
+                json_out("run",true,&id,&name,columns,&colnames);
+            } else {
+                json_out("run",code==0,&id,&name,array![code,output],&["code","output"]);
+            }
             code == 0
         }
     }

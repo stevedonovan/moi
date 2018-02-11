@@ -33,7 +33,8 @@ Execute commands on devices
   -j, --json  JSON output
   -v, --verbose tell us all about what's going on...
   -q, --quiet output only on error
-  -m, --message-format (default plain) one of plain,csv or json
+  --cols (string...) if defined, split the output of a run/launch command
+       and use these as column names in JSON output
   <command> (string)
         ls <keys>: display values of keys (defaults to 'addr','name')
         run cmd [pwd]: run command remotely
@@ -78,7 +79,7 @@ pub struct Flags {
     pub su: bool,
     pub sharing_with_su: bool,
     pub json: bool,
-   // format: String,
+    pub cols: Vec<String>,
 }
 
 impl Flags {
@@ -158,6 +159,7 @@ impl Flags {
             su: root,
             sharing_with_su: sharing,
             json: args.get_bool("json"),
+            cols: args.get_strings("cols"),
         }))
 
     }
@@ -339,8 +341,11 @@ impl Flags {
                 println!("alias set group {}",self.group_name);
             }
         }
-        if let Some(_) = t.get("quiet") {
-            self.quiet = true;
+        if let Some(v) = t.get("quiet") {
+            self.quiet = v.as_bool().or_err("alias: quiet must be a boolean")?;
+        }
+        if let Some(cols) = t.get("cols") {
+            self.cols = toml_strings(cols.as_array().or_err("alias: cols must be an array")?)?;
         }
 
         // it's a cool thing to help people.

@@ -203,6 +203,14 @@ pub fn array_of_strings(v: &JsonValue) -> io::Result<Vec<&str>> {
     v.members().map(|s| as_str(s)).collect()
 }
 
+pub fn strings_to_json<'a, I: Iterator<Item=&'a str>>(v: I) -> JsonValue {
+    let mut ja = JsonValue::new_array();
+    for s in v {
+        ja.push(JsonValue::String(s.into())).unwrap();
+    }
+    ja
+}
+
 pub fn maybe_field<'a>(o: &'a JsonValue, name: &str) -> Option<&'a JsonValue> {
     let val = &o[name];
     if val.is_null() {
