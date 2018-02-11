@@ -82,15 +82,13 @@ struct MessageData {
     query_topic: String,
     finis: bool,
     seq: u8,
-    verbose: bool,
-    quiet: bool,
-    json: bool,
+    flags: flags::Flags,
     no_groups: Cell<bool>
 
 }
 
 impl MessageData {
-    fn new (m: &Mosquitto, verbose: bool, quiet: bool, json: bool, commands: Vec<flags::CommandArgs>) -> MessageData {
+    fn new (m: &Mosquitto, flags: flags::Flags, commands: Vec<flags::CommandArgs>) -> MessageData {
         MessageData {
             m: m.clone(),
             sent_file: None,
@@ -104,9 +102,7 @@ impl MessageData {
             query_topic: QUERY_TOPIC.into(),
             finis: false,
             seq: 0,
-            verbose: verbose,
-            quiet: quiet,
-            json: json,
+            flags: flags,
             no_groups: Cell::new(false),
         }
     }
@@ -178,11 +174,11 @@ impl MessageData {
         if ! ok && ! handled {
             let name = self.lookup_name(&id);
             error!("{} {} failed",id,name);
-            if self.json {
+            if self.flags.json {
                 json_out(&self.current_command().command,false,&id,&name,array!["failed"],&["error"]);
             }
         }
-        if self.verbose {
+        if self.flags.verbose {
             println!("response {} {} {}",id,ok,handled);
         }
         self.responses.insert(id,ok);
@@ -232,7 +228,7 @@ impl MessageData {
 
     // how our JSON payload is encoded for remote queries
     fn send_query(&mut self) -> BoxResult<()> {
-        if self.verbose {
+        if self.flags.verbose {
             println!("query {:?}",self.current_query());
         }
         info!("query seq {}: {:?}",self.seq,self.current_query());
@@ -250,7 +246,7 @@ impl MessageData {
             q_json["group"] = name.as_str().into();
         }
         let payload = q_json.to_string();
-        if self.verbose {
+        if self.flags.verbose {
             println!("sent {}",payload);
         }
         self.m.publish(&self.query_topic,payload.as_bytes(),1,false)?;
@@ -265,13 +261,13 @@ impl MessageData {
         let stderr = resp["stderr"].to_string();
         let output = if code == 0 {stdout} else {stderr};
         let name = self.lookup_name(id);
-        if ! self.json {
+        if ! self.flags.json {
             let multiline = output.find('\n').is_some();
             let (delim,post) = if multiline {(":\n","\n")} else {("\t","")};
             let idc = White.bold().paint(id);
             let namec = White.bold().paint(name);
             if code == 0 {
-                if ! self.quiet {
+                if ! self.flags.quiet {
                     println!("{}\t{}{}{}{}",idc,namec,delim,output,post);
                 }
                 true
@@ -322,7 +318,7 @@ impl MessageData {
             Query::Get(ref cols, ref command) => {
                 match command.as_str() {
                     "ls" =>  {
-                        if ! self.json {
+                        if ! self.flags.json {
                             // Ugly. It will get Better...
                             let n = resp.len();
                             for idx in 0..n {
@@ -355,7 +351,7 @@ impl MessageData {
                         let time = resp[2].as_i64().unwrap();
                         let now = current_time_as_secs();
                         let diff = now - time;
-                        if ! self.json {
+                        if ! self.flags.json {
                             println!("{}\t{}\t{}",boldj(id),boldj(name),diff);
                         } else {
                             json_out("time",true,as_str_always(id),as_str_always(name),array![diff],&["time diff"]);
@@ -366,11 +362,11 @@ impl MessageData {
             },
             Query::Ping(instant) => {
                 // also a Get operation under the hood...
-                if ! self.quiet {
+                if ! self.flags.quiet {
                     let id = &resp[0];
                     let name = &resp[1];
                     let diff = duration_as_millis(instant.elapsed()) as i32;
-                    if ! self.json {
+                    if ! self.flags.json {
                         println!("{}\t{}\t{}",boldj(id),boldj(name),diff);
                     } else {
                         json_out("ping",true,as_str_always(id),as_str_always(name),array![diff],&["ping"]);
@@ -400,7 +396,7 @@ impl MessageData {
                 if self.sent_file.is_none() {
                     let bytes = &cf.bytes;
                     let topic = format!("{}/{}",FILE_TOPIC_PREFIX,self.seq);
-                    if self.verbose {
+                    if self.flags.verbose {
                         println!("publishing {} {} bytes on {}",cf.filename,bytes.len(),topic);
                     }
                     self.m.publish(&topic,bytes,1,true).unwrap();
@@ -423,7 +419,7 @@ impl MessageData {
             // the group command collects group members
             // which we then persist to file
             // TODO: error checking
-            if ! self.json {
+            if ! self.flags.json {
                 let bold = White.bold();
                 warn!("group {} created:",name);
                 for (k,v) in &self.group {
@@ -460,7 +456,7 @@ impl MessageData {
             for (id,name) in group {
                 if ! responses.contains_key(id) {
                     error!("error: {} {} failed to respond", id, name);
-                    if self.json {
+                    if self.flags.json {
                         json_out(&self.current_command().command,false,id,name,array!["failed to respond"],&["error"]);
                     }
                     ok = false;
@@ -470,6 +466,35 @@ impl MessageData {
         } else {
             self.responses.iter().all(|(_,&ok)| ok)
         })
+    }
+
+    fn process_flags(&mut self, store: &Config) -> BoxResult<()> {
+        // --name: this can be an address, name or group!
+        if self.flags.name_or_group != "none" {
+            if strutil::is_ipv4(&self.flags.name_or_group) {
+                self.flags.filter_desc = format!("addr={}",self.flags.name_or_group);
+            } else {  // a name?
+                if let Ok(addr) = self.lookup_addr(&self.flags.name_or_group) {
+                    self.flags.filter_desc = format!("addr={}",addr);
+                } else {
+                    self.flags.group_name = self.flags.name_or_group.clone();
+                }
+            }
+        }
+
+        // --group NAME works like --filter groups:NAME
+        // except the results are checked against saved group information
+        if self.flags.group_name != "none" {
+            let jgroup = lookup_group(&store, &self.flags.group_name)?;
+            // multistage group commands stop at first non-sucessful run operation
+            self.flags.filter_desc = format!("all groups:{} rc=0 {}",
+                self.flags.group_name,
+                if self.flags.filter_desc != "none" {self.flags.filter_desc.as_str()} else {""}
+            );
+            let group_name = self.flags.group_name.clone();
+            self.set_group(&group_name,jgroup);
+        }
+        Ok(())
     }
 
 }
@@ -553,7 +578,8 @@ fn run() -> BoxResult<bool> {
     let query = flags.construct_query_alias(&config, &commands, restricted)?;
 
     // message data is managed by mosquitto on_message handler
-    let mut message_data = MessageData::new(&m,flags.verbose,flags.quiet,flags.json,commands);
+    let mut message_data = MessageData::new(&m,flags,commands);
+
     message_data.all_group = match store.values.get("groups") {
         Some(groups) => {
             groups["all"].clone()
@@ -562,30 +588,9 @@ fn run() -> BoxResult<bool> {
     };
     message_data.set_queries(query);
 
-    // --name: this can be an address, name or group!
-    if flags.name_or_group != "none" {
-        if strutil::is_ipv4(&flags.name_or_group) {
-            flags.filter_desc = format!("addr={}",flags.name_or_group);
-        } else {  // a name?
-            if let Ok(addr) = message_data.lookup_addr(&flags.name_or_group) {
-                flags.filter_desc = format!("addr={}",addr);
-            } else {
-                flags.group_name = flags.name_or_group.clone();
-            }
-        }
-    }
+    message_data.process_flags(&store)?;
 
-    // --group NAME works like --filter groups:NAME
-    // except the results are checked against saved group information
-    if flags.group_name != "none" {
-        let jgroup = lookup_group(&store, &flags.group_name)?;
-        // multistage group commands stop at first non-sucessful run operation
-        flags.filter_desc = format!("all groups:{} rc=0 {}",
-            flags.group_name, if flags.filter_desc != "none" {flags.filter_desc.as_str()} else {""}
-        );
-        message_data.set_group(&flags.group_name,jgroup);
-    }
-    let filter = Condition::from_description(&flags.filter_desc);
+    let filter = Condition::from_description(&message_data.flags.filter_desc);
     info!("filter {:?}",filter);
 
     // Queries only meant for one device cause a temporary group
@@ -600,7 +605,7 @@ fn run() -> BoxResult<bool> {
         warn!("Warning: no group defined for wait! Setting timeout to {}ms",LAUNCH_TIMEOUT);
     }
 
-    let timeout = timeout::Timeout::new_shared(flags.timeout);
+    let timeout = timeout::Timeout::new_shared(message_data.flags.timeout);
 
     let msg_timeout = timeout.clone();
     let mut mc = m.callbacks(message_data);
@@ -612,13 +617,13 @@ fn run() -> BoxResult<bool> {
             if ! success {
                 let name = data.lookup_name(&id);
                 error!("{}\t{}\t{}", id,name,resp);
-                if data.json {
+                if data.flags.json {
                     json_out(&data.current_command().command,false,&id,&name,array![resp],&["error"]);
                 }
                 data.response(id,false,true);
                 return;
             } else {
-                if data.verbose {
+                if data.flags.verbose {
                     println!("id {} resp {}", id,resp);
                 }
                 info!("seq {} addr {} resp {}", seq,id,resp);
@@ -632,7 +637,7 @@ fn run() -> BoxResult<bool> {
         if file_resp.matches(&msg) {
             let mut seq = 0;
             let (id,ok,_) = MessageData::parse_response(msg.text(),&mut seq);
-            if data.json && ok {
+            if data.flags.json && ok {
                 let file = data.current_command().arguments[0].as_str();
                 json_out("push",true,&id,&data.lookup_name(&id),array![file],&["file"]);
             }
@@ -658,7 +663,7 @@ fn run() -> BoxResult<bool> {
                     error!("pull error {} {}", id,e);
                 },
                 Ok(dest) => {
-                    if data.json {
+                    if data.flags.json {
                         let file = data.current_command().arguments[0].as_str();
                         json_out("pull",true,&id,&data.lookup_name(&id),
                             array![file,dest.as_str()],&["remote","local"]);
@@ -675,14 +680,14 @@ fn run() -> BoxResult<bool> {
 
         if data.group_finished() || pvt_timeout.matches(&msg) {
             // TOO MANY UNWRAPS!
-            if data.verbose { println!("timeout seq {} {}",data.seq,data.query.len()); }
+            if data.flags.verbose { println!("timeout seq {} {}",data.seq,data.query.len()); }
             // clear any retained file content messages
             let mut sent_file = false;
             if let Some(ref file_topic) = data.sent_file {
                 sent_file = true;
                 m.publish(file_topic,b"",1,true).unwrap();
                 m.do_loop(50).unwrap(); // ensure it's actually published
-                if data.verbose { println!("clearing file topic {}",file_topic); }
+                if data.flags.verbose { println!("clearing file topic {}",file_topic); }
             }
             if sent_file {
                 data.sent_file = None;
