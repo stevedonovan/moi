@@ -1,5 +1,5 @@
 use std::time::{Instant,Duration};
-use moi::*;
+use super::*;
 
 pub struct Timeout {
     last_msg_time: Instant,

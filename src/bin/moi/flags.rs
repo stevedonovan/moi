@@ -18,7 +18,7 @@ use ansi_term::Colour::Yellow;
 const VERSION: &str = "0.1.6";
 
 const USAGE: &str = "
-Execute commands on devices
+MOI (MQTT Orchestration Interface) - execute commands on remote devices
   -V, --version version of MOI
   -c, --config (path default ~/.local/moi/config.toml) configuration file
   -f, --filter (default none) only for the selected devices
@@ -86,7 +86,7 @@ impl Flags {
     pub fn new() -> BoxResult<(Vec<CommandArgs>,Flags)> {
         let args = lapp::parse_args(USAGE);
         if args.get_bool("version") {
-            println!("MOI comand-line interface version {}",VERSION);
+            println!("MOI command-line interface version {}",VERSION);
             process::exit(0);
         }
 

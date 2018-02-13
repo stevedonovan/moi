@@ -13,7 +13,6 @@ extern crate moi;
 
 mod strutil;
 mod query;
-mod timeout;
 mod flags;
 mod commands;
 // mod output;

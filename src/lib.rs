@@ -9,6 +9,7 @@ extern crate time as timec;
 
 pub mod logging;
 pub mod toml_utils;
+pub mod timeout;
 use toml_utils::*;
 
 use std::path::{Path,PathBuf};

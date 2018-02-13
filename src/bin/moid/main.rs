@@ -219,7 +219,28 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
             .or_then_err(|| format!("run: dest does not exist {}",pwd.display()))?;
         if verb == "run" {
             // we Wait....
+            let timeout = timeout::Timeout::new_shared(1000);
+            let flag = make_shared(false);
+            let _t = {
+                let timeout = timeout.clone();
+                let flag = flag.clone();
+                thread::spawn(move || {
+                    loop {
+                        thread::sleep(Duration::from_millis(50));
+                        if lock!(timeout).timed_out() {
+                            error!("run: timed out, restarting");
+                            thread::sleep(Duration::from_millis(50));
+                            process::exit(1);
+                        } else
+                        if *lock!(flag) {
+                            break;
+                        }
+                    }
+                })
+            };
             let (code, stdout, stderr) = run_shell_command(&cmd,Some(&pwd));
+            lock!(timeout).update();
+            *lock!(flag) = true;
             handle_result_code(&mdata.cfg,code);
             Ok(object!{"code" => code, "stdout" => stdout, "stderr" => stderr})
         } else
