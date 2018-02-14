@@ -4,6 +4,8 @@ use super::*;
 pub struct Timeout {
     last_msg_time: Instant,
     timeout: Duration,
+    millis: i32,
+    enabled: bool,
 }
 
 impl Timeout {
@@ -11,6 +13,8 @@ impl Timeout {
         Timeout {
             last_msg_time: Instant::now(),
             timeout: Duration::from_millis(timeout as u64),
+            millis: timeout,
+            enabled: true,
         }
     }
 
@@ -22,12 +26,23 @@ impl Timeout {
         self.timeout = Duration::from_millis(timeout as u64)
     }
 
+    pub fn disable(&mut self) {
+        self.enabled = false;
+    }
+
+    pub fn enable(&mut self) {
+        self.enabled = true;
+        self.update();
+        let millis = self.millis;
+        self.set_timeout(millis);
+    }
+
     pub fn update(&mut self) {
         self.last_msg_time = Instant::now();
     }
 
     pub fn timed_out(&self) -> bool {
-        self.last_msg_time.elapsed() > self.timeout
+        self.enabled && self.last_msg_time.elapsed() > self.timeout
     }
 
 }

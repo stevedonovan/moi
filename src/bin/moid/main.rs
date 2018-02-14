@@ -219,28 +219,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
             .or_then_err(|| format!("run: dest does not exist {}",pwd.display()))?;
         if verb == "run" {
             // we Wait....
-            let timeout = timeout::Timeout::new_shared(1000);
-            let flag = make_shared(false);
-            let _t = {
-                let timeout = timeout.clone();
-                let flag = flag.clone();
-                thread::spawn(move || {
-                    loop {
-                        thread::sleep(Duration::from_millis(50));
-                        if lock!(timeout).timed_out() {
-                            error!("run: timed out, restarting");
-                            thread::sleep(Duration::from_millis(50));
-                            process::exit(1);
-                        } else
-                        if *lock!(flag) {
-                            break;
-                        }
-                    }
-                })
-            };
             let (code, stdout, stderr) = run_shell_command(&cmd,Some(&pwd));
-            lock!(timeout).update();
-            *lock!(flag) = true;
             handle_result_code(&mdata.cfg,code);
             Ok(object!{"code" => code, "stdout" => stdout, "stderr" => stderr})
         } else
@@ -496,6 +475,9 @@ fn run() -> BoxResult<()> {
         1)?;
     let quit = m.subscribe(QUIT_TOPIC,1)?;
 
+    let timeout = timeout::Timeout::new_shared(1000);
+    lock!(timeout).disable();
+
     let default_alive_msg = object!{"addr" => store.addr()}.to_string();
     let mut mc = m.callbacks(MsgData::new(store,&m));
 
@@ -504,25 +486,36 @@ fn run() -> BoxResult<()> {
     let ping_timeout = geti_or(toml_config,"alive_interval",60)? as u64;
     let do_reconnect = gets_or(toml_config,"alive_action","reconnect")? == "reconnect";
     let thread_m = m.clone();
+    let thread_timeout = timeout.clone();
     thread::spawn(move || {
         let mut count = 0;
+        let mut secs = 0;
         loop {
-            thread::sleep(Duration::from_secs(ping_timeout));
-            if let Err(__) = thread_m.publish(ALIVE_TOPIC,default_alive_msg.as_bytes(),1,false) {
-                count += 1;
+            thread::sleep(Duration::from_secs(1));
+            if lock!(thread_timeout).timed_out() {
+               error!("processing operation took too long - restarting");
+               process::exit(1);
             }
-            if count > 3 { // three strikes and we're out...
-               error!("three tries out: reconnecting...");
-               if do_reconnect {
-                   if let Err(e) = thread_m.reconnect() {
-                       error!("three tries out: reconnect failed {}",e);
+            if secs == ping_timeout {
+                secs = 0;
+                if let Err(__) = thread_m.publish(ALIVE_TOPIC,default_alive_msg.as_bytes(),1,false) {
+                    count += 1;
+                }
+                if count > 3 { // three strikes and we're out...
+                   error!("three tries out: reconnecting...");
+                   thread::sleep(Duration::from_millis(50)); // flushing issue....
+                   if do_reconnect {
+                       if let Err(e) = thread_m.reconnect() {
+                           error!("three tries out: reconnect failed {}",e);
+                           process::exit(1);
+                       }
+                   } else {
                        process::exit(1);
                    }
-               } else {
-                   process::exit(1);
-               }
-               count = 0;
+                   count = 0;
+                }
             }
+            secs += 1;
         }
     });
 
@@ -530,7 +523,10 @@ fn run() -> BoxResult<()> {
         // TODO error handling is still a mess
         // TODO RETRYING
         if query.matches(&msg) || query_me.matches(&msg) {
-            let res = match handle_query(mdata,msg.text()) {
+            lock!(timeout).enable();
+            let resp = handle_query(mdata,msg.text());
+            lock!(timeout).disable();
+            let res = match resp {
                 Ok(v) =>  {
                     if v == JsonValue::Null {
                         // only tell mother about queries intended for us
