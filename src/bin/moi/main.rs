@@ -23,7 +23,8 @@ use query::*;
 
 use mosquitto_client::Mosquitto;
 use json::JsonValue;
-use ansi_term::Colour::{Red,Yellow,White};
+use ansi_term::{ANSIString,Colour,Style};
+use Colour::{Red,Yellow,White};
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -65,7 +66,6 @@ pub fn json_out(cmd: &str, ok: bool, addr: &str, name: &str, j: JsonValue, cols:
         println!("}}");
     }
 }
-
 
 struct MessageData {
     m: Mosquitto,
@@ -252,6 +252,15 @@ impl MessageData {
         Ok(())
     }
 
+    fn bold<'a>(&self, s: &'a str, c: Colour) -> ANSIString<'a> {
+        if self.flags.use_colour {
+            c.bold().paint(s)
+        } else {
+            ANSIString::from(s)
+        }
+    }
+
+
     // result of a remote process is called either as a direct response (run)
     // or later (launch)
     fn handle_run_launch(&self, id: &str, resp: JsonValue) -> bool {
@@ -263,15 +272,15 @@ impl MessageData {
         if ! self.flags.json {
             let multiline = output.find('\n').is_some();
             let (delim,post) = if multiline {(":\n","\n")} else {("\t","")};
-            let idc = White.bold().paint(id);
-            let namec = White.bold().paint(name);
             if code == 0 {
                 if ! self.flags.quiet {
-                    println!("{}\t{}{}{}{}",idc,namec,delim,output,post);
+                    println!("{}\t{}{}{}{}", self.bold(id,White),self.bold(&name,White),delim,output,post);
                 }
                 true
             } else {
-                println!("{}\t{}{}(code {}): {}{}",idc,namec,delim,Red.bold().paint(code.to_string()),output,post);
+                let code = code.to_string();
+                println!("{}\t{}{}(code {}): {}{}", self.bold(id,White),self.bold(&name,White),delim
+                    ,self.bold(&code,Red),output,post);
                 // important: failed remote commands must count as failures
                 false
             }
@@ -314,9 +323,14 @@ impl MessageData {
     fn handle_response(&mut self, id: String, mut resp: JsonValue) {
         let mut ok = Some(true);
         let mut handled = false;
-        let bold = White.bold();
+        let use_colour = self.flags.use_colour;
         let boldj = |j: &JsonValue| {
-            bold.paint(j.to_string())
+            let s = j.to_string();
+            if use_colour {
+                White.bold().paint(s)
+            } else {
+                Style::new().paint(s)
+            }
         };
         // need a split borrow here, hence repeated code
         match self.query[self.seq as usize] {
@@ -332,7 +346,7 @@ impl MessageData {
                                     print!("{}",boldj(r));
                                 } else {
                                     if r == &JsonValue::Null {
-                                        print!("{}",Red.paint("null"));
+                                        print!("{}",self.bold("null",Red));
                                     } else {
                                         print!("{}",r);
                                     }
@@ -425,10 +439,9 @@ impl MessageData {
             // which we then persist to file
             // TODO: error checking
             if ! self.flags.json {
-                let bold = White.bold();
                 warn!("group {} created:",name);
                 for (k,v) in &self.group {
-                    println!("{}\t{}",bold.paint(k.as_str()),bold.paint(v.as_str()));
+                    println!("{}\t{}",self.bold(k.as_str(),White),self.bold(v.as_str(),White));
                 }
             } else {
                 for (k,v) in &self.group {
@@ -526,14 +539,24 @@ fn run() -> BoxResult<bool> {
     let log_file = if flags.sharing_with_su { None } else { Some(path.as_path()) };
     // we echo errors and warnings to console with colours (unless JSON output)
     let echo_console = ! flags.json;
+    let use_colour = flags.use_colour;
     logging::init(log_file,gets_or(config,"log_level","info")?,move |record| {
         if echo_console {
-            let text = format!("{}",record.args());
             if record.level() == log::Level::Error {
-                eprintln!("{}",Red.bold().paint(text));
+                if use_colour {
+                    let text = format!("{}",record.args());
+                    eprintln!("{}",Red.bold().paint(text));
+                } else {
+                    eprintln!("{}",record.args());
+                }
             }  else
             if record.level() == log::Level::Warn {
-               println!("{}",Yellow.bold().paint(text));
+                if use_colour {
+                    let text = format!("{}",record.args());
+                    println!("{}",Yellow.bold().paint(text));
+                } else {
+                    println!("{}",record.args());
+                }
             }
         }
     })?;

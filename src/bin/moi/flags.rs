@@ -33,6 +33,8 @@ MOI (MQTT Orchestration Interface) - execute commands on remote devices
   -j, --json  JSON output
   -v, --verbose tell us all about what's going on...
   -q, --quiet output only on error
+  --colour-always  force colour output even if not a terminal
+  --no-colour  don't colour output (default is to colour output if a terminal)
   --cols (string...) if defined, split the output of a run/launch command
        and use these as column names in JSON output
   <command> (string)
@@ -80,6 +82,7 @@ pub struct Flags {
     pub sharing_with_su: bool,
     pub json: bool,
     pub cols: Vec<String>,
+    pub use_colour: bool,
 }
 
 impl Flags {
@@ -146,6 +149,18 @@ impl Flags {
             push(this_chunk);
         }
 
+        let colour_always = args.get_bool("colour-always");
+        let no_colour = args.get_bool("no-colour");
+        let istty = unsafe { libc::isatty(libc::STDOUT_FILENO as i32) } != 0;
+        let use_colour = if colour_always {
+            true
+        } else
+        if no_colour {
+            false
+        } else {
+            istty
+        };
+
         Ok((commands,Flags {
             filter_desc: args.get_string("filter"),
             group_name: args.get_string("group"),
@@ -160,6 +175,7 @@ impl Flags {
             sharing_with_su: sharing,
             json: args.get_bool("json"),
             cols: args.get_strings("cols"),
+            use_colour: use_colour,
         }))
 
     }
