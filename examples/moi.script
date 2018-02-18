@@ -1,0 +1,70 @@
+examples$ # clear our state
+examples$ rm *-hello
+examples$ # list the remotes
+examples$ moi ls
+10.10.10.22	merry
+10.10.10.11	bilbo
+10.10.10.23	pippin
+10.10.10.10	frodo
+examples$ # define the all group
+examples$ moi group all
+group all created:
+10.10.10.11	bilbo
+10.10.10.10	frodo
+10.10.10.22	merry
+10.10.10.23	pippin
+examples$ # list the moid versions only for the all group
+examples$ moi -g all ls moid
+10.10.10.22	merry	0.1.6
+10.10.10.11	bilbo	0.1.6
+10.10.10.23	pippin	0.1.6
+10.10.10.10	frodo	0.1.6
+examples$ # create a little script
+examples$ echo 'echo hello' > hello && chmod +x hello
+examples$ # push it to our moids
+examples$ moi -g all push hello home
+examples$ # and run it in their home directories
+examples$ moi -g all run './hello' home
+10.10.10.22	merry	hello
+10.10.10.11	bilbo	hello
+10.10.10.23	pippin	hello
+10.10.10.10	frodo	hello
+examples$ # alternative way to say the same thing
+examples$ moi run './hello' all:home
+10.10.10.22	merry	hello
+10.10.10.11	bilbo	hello
+10.10.10.23	pippin	hello
+10.10.10.10	frodo	hello
+examples$ # can push and run in one invocation
+examples$ moi push-run hello all:home './hello'
+10.10.10.11	bilbo	hello
+10.10.10.10	frodo	hello
+10.10.10.22	merry	hello
+10.10.10.23	pippin	hello
+examples$ # now pull that file from frodo
+examples$ moi -n frodo pull home/hello hello-copy
+examples$ # should be the same file!
+examples$ diff hello hello-copy
+examples$ # pull all the copies of hello - note the %n for name pattern
+examples$ moi -g all pull home/hello %n-hello
+examples$ # and these are the files
+examples$ ls -1 *-hello
+bilbo-hello
+frodo-hello
+merry-hello
+pippin-hello
+examples$ # again, this is equivalent
+examples$ moi pull all:home/hello %n-hello
+examples$ # if you just provide a directory, moi assumes %a-%n-NAME
+examples$ moi pull all:home/hello .
+examples$ # these files should all be the same
+examples$ ls -1 *-hello
+bilbo-10.10.10.11-hello
+bilbo-hello
+frodo-10.10.10.10-hello
+frodo-hello
+merry-10.10.10.22-hello
+merry-hello
+pippin-10.10.10.23-hello
+pippin-hello
+
