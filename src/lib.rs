@@ -160,7 +160,7 @@ pub fn ip4_address(interface: &str, noisy: bool) -> Option<String> {
 pub fn read_to_string<P: AsRef<Path>>(file: P) -> io::Result<String> {
     let path = file.as_ref();
     let mut f = File::open(path)
-        .map_err(|e| io_error(&format!("reading text {}: {}",path.display(),e)))?;
+        .map_err(|e| io_error(&format!("reading text file {}: {}",path.display(),e)))?;
 
     let mut s = String::new();
     f.read_to_string(&mut s)?;
@@ -170,7 +170,7 @@ pub fn read_to_string<P: AsRef<Path>>(file: P) -> io::Result<String> {
 pub fn read_to_buffer<P: AsRef<Path>>(file: P) -> io::Result<Vec<u8>> {
     let path = file.as_ref();
     let mut f = File::open(path)
-        .map_err(|e| io_error(&format!("reading binary {}: {}",path.display(),e)))?;
+        .map_err(|e| io_error(&format!("reading binary file {}: {}",path.display(),e)))?;
 
     let mut buff = Vec::new();
     f.read_to_end(&mut buff)?;
@@ -180,7 +180,7 @@ pub fn read_to_buffer<P: AsRef<Path>>(file: P) -> io::Result<Vec<u8>> {
 pub fn write_all<P: AsRef<Path>>(file: P, contents: &str) -> io::Result<()> {
     let path = file.as_ref();
     let mut f = File::create(path)
-        .map_err(|e| io_error(&format!("writing {}: {}",path.display(),e)))?;
+        .map_err(|e| io_error(&format!("writing file {}: {}",path.display(),e)))?;
 
     f.write_all(contents.as_bytes())
 }

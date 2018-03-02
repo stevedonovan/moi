@@ -212,6 +212,7 @@ impl CopyFile {
 pub struct FetchFile {
     pub source: PathBuf,
     pub local_dest: PathBuf,
+    pub pattern_dir: bool,
 }
 
 impl FetchFile {

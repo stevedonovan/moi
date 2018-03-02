@@ -109,6 +109,7 @@ impl Flags {
         let moi_dir = base_dir.join("moi");
         let default_config = moi_dir.join("config.toml");
         let json_store = moi_dir.join("store.json");
+
         if ! moi_dir.exists() {
             fs::DirBuilder::new().recursive(true).create(&moi_dir)?;
             let mut f = fs::File::create(&default_config)?;
@@ -124,6 +125,12 @@ impl Flags {
                 println!("{}",Yellow.bold().paint(text));
             }
         }
+
+        let config_file = if root || sharing {
+            default_config
+        } else {
+            args.get_path("config")
+        };
 
         let command = args.get_string("command");
         let mut arguments = args.get_strings("args");
@@ -168,7 +175,7 @@ impl Flags {
             timeout: args.get_integer("timeout"),
             verbose: args.get_bool("verbose"),
             quiet: args.get_bool("quiet"),
-            config_file: if root || sharing {default_config} else {args.get_path("config")},
+            config_file: config_file,
             json_store: json_store,
             moi_dir: moi_dir,
             su: root,
@@ -182,12 +189,15 @@ impl Flags {
 
     ///// creating queries out of command-line args //////
 
-    fn keyvalue_args(args: &[String]) -> BoxResult<HashMap<String,String>> {
+    fn keyvalue_args(args: &[String],is_arr: bool) -> BoxResult<HashMap<String,String>> {
         use strutil::split_at_delim;
         let mut map = HashMap::new();
         for s in args {
-            let (k,v) = split_at_delim(s,"=")
+            let (mut k,v) = split_at_delim(s,"=")
                 .or_then_err(|| format!("{} is not a key-value pair",s))?;
+            if is_arr && k.ends_with('+') { // allow '+=' for array append op
+                k = &k[0..k.len()-1];
+            }
             KeyValue::valid_key(k)
                 .or_then_err(|| format!("{} is not a valid key name",k))?;
             map.insert(k.to_string(),v.to_string());
@@ -206,7 +216,7 @@ impl Flags {
     }
 
     // implement our commands as Query enum values
-    fn construct_query(&mut self, cmd: &str, args: &[String], restricted: bool) -> BoxResult<Query> {
+    fn construct_query(&mut self, cmd: &str, args: &[String], restricted: bool, config: &toml::Value) -> BoxResult<Query> {
         use strutil::strings;
         if restricted && ! &["ls","time","ping"].contains(&cmd) {
             return err_io(&format!("{} is a restricted command. Use sudo",cmd));
@@ -227,13 +237,13 @@ impl Flags {
             },
             "set" | "seta" => {
                 (args.len() > 0).or_then_err(|| format!("{}: key1=value1 [key2=value2 ...]",cmd))?;
-                let map = Flags::keyvalue_args(args)?;
+                let map = Flags::keyvalue_args(args,cmd=="seta")?;
                 Ok(if cmd=="set" {Query::Set(map)} else {Query::Seta(map)})
             },
             "invoke" => {
                 (args.len() > 0).or_err("invoke: custom-command [key1=value1 ...]")?;
                 let name = args[0].clone();
-                let map = Flags::keyvalue_args(&args[1..])?;
+                let map = Flags::keyvalue_args(&args[1..],false)?;
                 Ok(Query::Invoke(name,map))
             },
             "remove-group" => {
@@ -273,18 +283,24 @@ impl Flags {
                 let remote_path = PathBuf::from(dest);
                 let mut local_path = PathBuf::from(&args[1]);
                 if local_path.is_dir() {
-                    local_path.push(&format!("%n-%a-{}",remote_path.file_name().unwrap().to_str().unwrap()));
+                    // we are just given a directory, so must choose a % pattern to create the returned file names
+                    let default_pattern = gets_or(config,"default_pull_pattern","%n-%a-")?;
+                    local_path.push(&format!("{}{}",default_pattern,remote_path.file_name().unwrap().to_str().unwrap()));
                 }
-                {
+                let pattern_dir = {
                     let parent = local_path.parent()
                         .or_then_err(|| format!("pull: destination {} has no parent",local_path.display()))?;
-                    if parent != Path::new("") {
+                    // if the directory itself is formed with a pattern, we take special care (will have to be created later)
+                    let parent_has_pattern = parent.to_str().unwrap().find('%').is_some();
+                    if parent != Path::new("") && ! parent_has_pattern {
                         writeable_directory(&parent)?;
                     }
-                }
+                    parent_has_pattern
+                };
                 Ok(Query::Fetch(FetchFile {
                     source: remote_path,
                     local_dest: local_path,
+                    pattern_dir: pattern_dir,
                 }))
             },
             "push-run" => {
@@ -294,8 +310,8 @@ impl Flags {
                 let dest = &args[1];
                 let cmd = &args[2];
                 Ok(Query::Actions(vec![
-                    self.construct_query("push",&strings(&[file,dest]),restricted)?,
-                    self.construct_query("run",&strings(&[cmd,dest]),restricted)? // use dest as pwd
+                    self.construct_query("push",&strings(&[file,dest]),restricted,config)?,
+                    self.construct_query("run",&strings(&[cmd,dest]),restricted,config)? // use dest as pwd
                 ]))
             },
             "run-pull" => {
@@ -304,8 +320,8 @@ impl Flags {
                 let dir = &args[1];
                 let file = &args[2];
                 Ok(Query::Actions(vec![
-                    self.construct_query("run",&strings(&[cmd,dir]),restricted)?,
-                    self.construct_query("pull",&strings(&[file,dir]),restricted)?
+                    self.construct_query("run",&strings(&[cmd,dir]),restricted,config)?,
+                    self.construct_query("pull",&strings(&[file,dir]),restricted,config)?
                 ]))
             },
             "restart" => {
@@ -409,7 +425,7 @@ impl Flags {
             }
             // regular plain jane arguments - will complain if not recognized
             if ! was_alias {
-                res.push(self.construct_query(&cmd.command, &cmd.arguments, restricted)?)
+                res.push(self.construct_query(&cmd.command, &cmd.arguments, restricted, config)?)
             }
         }
 

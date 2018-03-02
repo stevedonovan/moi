@@ -26,7 +26,7 @@ use json::JsonValue;
 use ansi_term::{ANSIString,Colour,Style};
 use Colour::{Red,Yellow,White};
 
-use std::path::PathBuf;
+use std::path::{Path,PathBuf};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::{fs,io,thread,process};
@@ -310,10 +310,18 @@ impl MessageData {
             Query::Fetch(ref ff) => ff,
             _ => {return err_io(&format!("MOI/fetch came in but not Fetch query!"));}
         };
-        if let Ok(dest) = strutil::replace_percent_destination(ff.local_dest.to_str().unwrap(),addr,name) {
-            let mut f = fs::File::create(&dest)?;
+        let local_dest = ff.local_dest.to_str().unwrap();
+        if let Ok(dest) = strutil::replace_percent_destination(local_dest,addr,name) {
+            let path = Path::new(&dest);
+            if ff.pattern_dir { // e.g something like %n/file-name
+                let parent = path.parent().unwrap();
+                if ! parent.is_dir() {
+                    fs::create_dir(parent)?;
+                }
+            }
+            let mut f = fs::File::create(path)?;
             f.write_all(payload)?;
-            return Ok(dest);
+            return Ok(dest.clone());
         } else {
             return err_io(&format!("local dest substitution failed {}",ff.local_dest.display()));
         }
