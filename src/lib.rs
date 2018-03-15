@@ -78,7 +78,7 @@ pub fn make_shared<T> (t: T) -> SharedPtr<T> {
     Arc::new(Mutex::new(t))
 }
 
-pub trait MoiPlugin {
+pub trait MoiPlugin: Sync + Send {
 
     fn command(&mut self, _name: &str, _args: &JsonValue) -> Option<BoxResult<JsonValue>> {
         None
@@ -355,7 +355,7 @@ impl Config {
 
     pub fn geti_or(&self,key: &str, def: i32) -> io::Result<i32> {
         Ok(match self.values.get(key) {
-            Some(j) => j.as_i32().or_then_err(|| format!("{} must be a string", key))?,
+            Some(j) => j.as_i32().or_then_err(|| format!("{} must be an integer", key))?,
             None => def
         })
     }
