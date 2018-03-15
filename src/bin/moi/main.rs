@@ -611,7 +611,7 @@ fn run() -> BoxResult<bool> {
     } else {
         gets_or(&config,"restricted","yes")? == "yes"
     };
-    let query = flags.construct_query_alias(&config, &commands, restricted)?;
+    let query = flags.construct_query_alias(&toml, &config, &commands, restricted)?;
 
     // message data is managed by mosquitto on_message handler
     let mut message_data = MessageData::new(&m,flags,commands);

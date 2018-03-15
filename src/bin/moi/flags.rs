@@ -333,12 +333,12 @@ impl Flags {
         }
     }
 
-    fn query_alias(&mut self, def: &toml::Value, config: &toml::Value, cmd: &CommandArgs, help: &str, restricted: bool) -> BoxResult<Query> {
+    fn query_alias(&mut self, toml: &toml::Value, def: &toml::Value, config: &toml::Value, cmd: &CommandArgs, help: &str, restricted: bool) -> BoxResult<Query> {
         if let Some(alias) = def.get("alias") {
             let alias = alias.as_str().or_err("alias: alias must be string")?;
             let real_alias = strutil::replace_dollar_args(alias,&cmd.arguments)?;
             let cmds = &[CommandArgs{command: real_alias, arguments: cmd.arguments.clone()}];
-            Ok(self.construct_query_alias(config,cmds,restricted)?)
+            Ok(self.construct_query_alias(toml,config,cmds,restricted)?)
         } else {
             // MUST have at least "command" and "args"
             let alias_command = def.get("command").or_err("alias: command must be defined")?
@@ -354,11 +354,11 @@ impl Flags {
                 println!("alias command {} args {:?}",alias_command,alias_args);
             }
             let cmds = &[CommandArgs{command: alias_command.into(), arguments: alias_args}];
-            Ok(self.construct_query_alias(config,cmds,restricted)?)
+            Ok(self.construct_query_alias(toml,config,cmds,restricted)?)
         }
     }
 
-    fn query_alias_collect(&mut self, t: &toml::Value, config: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>, restricted: bool) -> BoxResult<()> {
+    fn query_alias_collect(&mut self, toml: &toml::Value, t: &toml::Value, config: &toml::Value, cmd: &CommandArgs, res: &mut Vec<Query>, restricted: bool) -> BoxResult<()> {
         // the filter and/or the group can be overriden, but currently only in the first command
         // of a sequence
         if let Some(filter) = gets_opt(t,"filter")? {
@@ -385,12 +385,12 @@ impl Flags {
         // there may be multiple stages, so sections [commands.NAME.1], [commands.NAME.2]... etc in config
         let stages = geti_or(t,"stages",0)?;
         if stages == 0 {
-            res.push(self.query_alias(t,config,cmd,help,restricted)?);
+            res.push(self.query_alias(toml,t,config,cmd,help,restricted)?);
         } else {
             for i in 1..stages+1 {
                 let idx = i.to_string();
                 let sub = t.get(&idx).or_then_err(|| format!("stage {} not found",idx))?;
-                res.push(self.query_alias(sub,config,cmd,help,restricted)?);
+                res.push(self.query_alias(toml,sub,config,cmd,help,restricted)?);
             }
         }
         Ok(())
@@ -398,28 +398,28 @@ impl Flags {
 
     // Program arguments passed as mutable reference, because
     // command aliases MAY modify the filter or group value
-    pub fn construct_query_alias(&mut self, config: &toml::Value, commands: &[CommandArgs], restricted: bool) -> BoxResult<Query> {
+    pub fn construct_query_alias(&mut self,toml: &toml::Value, config: &toml::Value, commands: &[CommandArgs], restricted: bool) -> BoxResult<Query> {
         let mut res = Vec::new();
         for cmd in commands.iter() {
             let mut was_alias = false;
             // there is a section [commands.NAME] in the config TOML
-            if let Some(ref lookup) = config.get("commands") {
+            if let Some(ref lookup) = toml.get("commands") {
                 if let Some(t) = lookup.get(&cmd.command) { // we have an alias!
                     // these are not restricted operations
-                    self.query_alias_collect(t,&config,cmd,&mut res,false)?;
+                    self.query_alias_collect(toml,t,config,cmd,&mut res,false)?;
                     was_alias = true;
                 }
             }
             // OK, maybe the command NAME is NAME.toml or ~/.local/moi/NAME.toml
             if ! was_alias {
-                if let Some((local,toml)) = maybe_toml_config(&cmd.command,&self.moi_dir)? {
+                if let Some((local,t)) = maybe_toml_config(&cmd.command,&self.moi_dir)? {
                     // local alias must respect restricted mode
                     let actual_restriction = if restricted {
                         local
                     } else {
                         false
                     };
-                    self.query_alias_collect(&toml,&config,cmd,&mut res, actual_restriction)?;
+                    self.query_alias_collect(toml,&t,config,cmd,&mut res, actual_restriction)?;
                     was_alias = true;
                 }
             }
