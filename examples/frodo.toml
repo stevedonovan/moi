@@ -2,3 +2,6 @@
 home = "stations/frodo"
 addr = "10.10.10.10"
 name = "frodo"
+alive_vars = ["addr","name","time"]
+alive_interval = 5
+

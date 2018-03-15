@@ -40,7 +40,7 @@ struct MsgData {
     seq: u8,
     m: Mosquitto,
     pending_buffer: Option<Vec<u8>>,
-    plugins: Plugins,
+    plugins: SharedPtr<Plugins>,
 }
 
 impl MsgData {
@@ -51,7 +51,7 @@ impl MsgData {
             seq: 0,
             m: m.clone(),
             pending_buffer: None,
-            plugins: Plugins::new(cfg),
+            plugins: make_shared(Plugins::new(cfg)),
         }
     }
 
@@ -167,27 +167,38 @@ fn handle_result_code(pcfg: &SharedPtr<Config>, code: i32) {
     }
 }
 
+// get a list of keys
+fn populate_result_array(cfg: &Config, plugins: &Plugins, args: &JsonValue) -> BoxResult<JsonValue> {
+    let mut res = JsonValue::new_array();
+    for s in args.members() {
+        let s = as_str(s)?; // keys must be strings...
+        if let Some(val) = plugins.var(s) { // they may be Special
+            res.push(val)?;
+        } else {
+            // but we return Null if not-found
+            res.push(cfg.get_or(s,JsonValue::Null).clone())?;
+        }
+    }
+    Ok(res)
+}
+
 fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<JsonValue> {
     if verb == "get" {
         let cfg = lock!(mdata.cfg);
-        // get a list of keys
-        let mut res = JsonValue::new_array();
-        for s in args.members() {
-            let s = as_str(s)?; // keys must be strings...
-            if let Some(val) = mdata.plugins.var(s) { // they may be Special
-                res.push(val)?;
-            } else {
-                // but we return Null if not-found
-                res.push(cfg.get_or(s,JsonValue::Null).clone())?;
-            }
-        }
-        Ok(res)
+        let plugins = lock!(mdata.plugins);
+        populate_result_array(&cfg,&plugins,args)
     } else
     if verb == "set" {
         let mut cfg = lock!(mdata.cfg);
         // set keys on this device
         for (key,val) in args.entries() {
-            cfg.insert(key, val);
+            if key == "alive_interval" {
+                let interval: u32 = val.to_string().parse()?;
+                let val = JsonValue::from(interval);
+                cfg.insert(key, &val);
+            } else {
+                cfg.insert(key, val);
+            }
         }
         // we persist the values immediately...
         cfg.write()?;
@@ -319,7 +330,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
     if verb == "wait" {
         Ok(JsonValue::Null)
     } else {
-        if let Some(res) = mdata.plugins.command(verb,args) {
+        if let Some(res) = lock!(mdata.plugins).command(verb,args) {
             Ok(res?)
         } else {
             Err(io_error(&format!("unknown command {}",verb)).into())
@@ -478,27 +489,42 @@ fn run() -> BoxResult<()> {
     let timeout = timeout::Timeout::new_shared(1000);
     lock!(timeout).disable();
 
-    let default_alive_msg = object!{"addr" => store.addr()}.to_string();
+    // specifying the alive message payload
+    let alive_vars =  if let Some(vars) = toml_config.get("alive_vars") {
+        let vars = vars.as_array().or_err("'alive_vars' must be array")?;
+        toml_strings(&vars)?
+    } else {
+        vec!["addr".into()]
+    };
+    let alive_vars = JsonValue::from(alive_vars);
+
     let mut mc = m.callbacks(MsgData::new(store,&m));
+    let t_cfg = mc.data.cfg.clone();
+    let t_plugins = mc.data.plugins.clone();
 
     // keepalive strategy for moid is to publish an "I'm alive!" message occaisionally
-    // TODO the payload must be customizable
-    let ping_timeout = geti_or(toml_config,"alive_interval",60)? as u64;
+    let alive_interval = geti_or(toml_config,"alive_interval",60)? as u64;
+    lock!(t_cfg).insert_into("alive_interval",alive_interval);
     let do_reconnect = gets_or(toml_config,"alive_action","reconnect")? == "reconnect";
     let thread_m = m.clone();
     let thread_timeout = timeout.clone();
     thread::spawn(move || {
         let mut count = 0;
         let mut secs = 0;
+        let mut ping_timeout = 0;
         loop {
             thread::sleep(Duration::from_secs(1));
+            let cfg = lock!(t_cfg);
             if lock!(thread_timeout).timed_out() {
                error!("processing operation took too long - restarting");
                process::exit(1);
             }
-            if secs == ping_timeout {
+
+            if secs >= ping_timeout {
                 secs = 0;
-                if let Err(__) = thread_m.publish(ALIVE_TOPIC,default_alive_msg.as_bytes(),1,false) {
+                let plugins = lock!(t_plugins);
+                let res = populate_result_array(&cfg,&plugins, &alive_vars).unwrap().to_string();
+                if let Err(__) = thread_m.publish(ALIVE_TOPIC,res.as_bytes(),1,false) {
                     count += 1;
                 }
                 if count > 3 { // three strikes and we're out...
@@ -510,11 +536,12 @@ fn run() -> BoxResult<()> {
                            process::exit(1);
                        }
                    } else {
-                       process::exit(1);
+                        process::exit(1);
                    }
                    count = 0;
                 }
             }
+            ping_timeout = cfg.geti_or("alive_interval",60).unwrap();
             secs += 1;
         }
     });
