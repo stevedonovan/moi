@@ -71,7 +71,7 @@ impl KeyValue {
     }
 
     pub fn valid_key(key: &str) -> bool {
-        key.chars().all(|c| c.is_alphanumeric() || c == '-') &&
+        key.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') &&
          ! DONT_CLOBBER.contains(&key)
     }
 }
