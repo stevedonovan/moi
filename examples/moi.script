@@ -1,5 +1,5 @@
 examples$ # clear our state
-examples$ rm *-hello
+examples$ rm -f *-hello
 examples$ # list the remotes
 examples$ moi ls
 10.10.10.22	merry
