@@ -192,13 +192,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
         let mut cfg = lock!(mdata.cfg);
         // set keys on this device
         for (key,val) in args.entries() {
-            if key == "alive_interval" {
-                let interval: u32 = val.to_string().parse()?;
-                let val = JsonValue::from(interval);
-                cfg.insert(key, &val);
-            } else {
-                cfg.insert(key, val);
-            }
+            cfg.insert(key, val)?;
         }
         // we persist the values immediately...
         cfg.write()?;
@@ -260,7 +254,7 @@ fn handle_verb(mdata: &mut MsgData, verb: &str, args: &JsonValue) -> BoxResult<J
                 } else {
                     // not waiting, so we put the result into the store using jobname
                     let mut cfg = lock!(shared_cfg);
-                    cfg.insert(&jobname,&res);
+                    cfg.insert(&jobname,&res).unwrap();
                     cfg.write().unwrap();
                 }
                 // either way, flag 'rc' if we failed!

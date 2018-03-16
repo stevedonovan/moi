@@ -293,14 +293,44 @@ impl Config {
     pub fn insert_into<V: Into<JsonValue>>(&mut self, key: &str, val: V) {
         self.values.insert(key.into(),val.into());
     }
+    
+    fn json_type(val: &JsonValue) -> &str {
+        use JsonValue::*;
+        match *val {
+            Null => "null",
+            Short(_) | String(_) => "string",
+            Number(_) => "number",
+            Boolean(_) => "boolean",
+            Object(_) => "object",
+            Array(_) => "array",
+        }
+    }
+    
+    fn assert_json_type(&self, key: &str, val: &JsonValue) -> io::Result<JsonValue> {
+        if let Some(existing_val) = self.values.get(key) {
+            let et = Config::json_type(existing_val);
+            let vt = Config::json_type(val);
+            if et == "number" && vt == "string" {
+                let s = val.as_str().unwrap();
+                let num: f64 = s.parse()
+                    .map_err(|e| io_error(&format!("cannot parse {:} as number: {}",s,e)))?;
+                return Ok(num.into());
+            } else {
+                (et == vt).or_then_err(|| format!("key type is {}, not {}!",et,vt))?;
+            }
+        }
+        Ok(val.clone())
+    }
 
     // setting a key to null clears it....
-    pub fn insert(&mut self, key: &str, val: &JsonValue) {
+    pub fn insert(&mut self, key: &str, val: &JsonValue) -> io::Result<()> {
         if val == &JsonValue::Null {
             self.values.remove(key);
         } else {
-            self.values.insert(key.into(), val.clone());
+            let val = self.assert_json_type(key,val)?;
+            self.values.insert(key.into(), val);
         }
+        Ok(())
     }
 
     // the idea is NOT to add values if already present in the array
