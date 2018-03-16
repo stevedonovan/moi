@@ -1,6 +1,7 @@
 use flags::*;
 use moi::*;
 use toml;
+use ansi_term::Colour::White;
 use std::fs;
 use std::path::Path;
 use toml_utils::*;
@@ -19,10 +20,19 @@ impl <'a> CommandHandler<'a> {
             config: config,
         }
     }
+    
+    fn bold(&self, name: &str) -> String {
+        if self.flags.use_colour {
+            White.bold().paint(name).to_string()
+        } else {
+            name.to_string()
+        }        
+    }
 
     pub fn groups(&self) -> BoxResult<bool> {
         if let Some(groups) = self.store.values.get("groups") {
             for (name,members) in groups.entries() {
+                let name = self.bold(name);
                 if self.flags.verbose {
                     println!("{}:",name);
                     for (addr,name) in members.entries() {
@@ -41,7 +51,7 @@ impl <'a> CommandHandler<'a> {
     fn toml_commands(&self, name: &str, t: &toml::Value) -> BoxResult<()> {
         if t.get("command").is_some() || t.get("stages").is_some() {
             let help = gets_or(t,"help","<no help>")?;
-            println!("{}: {}", name,help);
+            println!("{}: {}", self.bold(name),help);
         }
         Ok(())
     }

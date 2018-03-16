@@ -10,10 +10,10 @@ consist of a _filter_ and a _command_ expressed in JSON. They then respond
 with a JSON result.
 
 We had been investigating Salt Stack in a similar context, and `moi` is in
-some ways a reaction to Salt: small, focussed, assuming that the remote
+some ways a reaction to Salt: small, focused, and assuming that the remote
 devices are Unix-like. We can always lean on a minimal POSIX environment
 in the remotes, and use shell to do the actual work rather than some
-dialect of YAML.
+dialect of YAML (I am not a fan).
 
 `moi` provides the following operations:
 
